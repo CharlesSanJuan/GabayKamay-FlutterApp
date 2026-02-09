@@ -3,9 +3,14 @@ import 'screens/home_screen.dart';
 import 'screens/translate_screen.dart';
 import 'screens/training_screen.dart';
 import 'screens/dictionary_screen.dart';
-
-void main() {
-  runApp(const MyApp());
+import 'package:supabase_flutter/supabase_flutter.dart';
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Supabase.initialize(
+    url: 'https://ptpddajvnigunaxaaddy.supabase.co',
+    anonKey: 'sb_publishable_UXEG3bJJCfdfS63kACDpjw_ffYPkfeg',
+  );
+  runApp(MyApp());
 }
 
 class MyApp extends StatelessWidget {

@@ -11,20 +11,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:gabay_kamay/main.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
+  testWidgets('HomeScreen loads and shows Smart Glove Translator title', (WidgetTester tester) async {
     await tester.pumpWidget(const MyApp());
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    // Check for the AppBar title text
+    expect(find.text('Smart Glove Translator'), findsOneWidget);
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
-
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    // Check for the three main buttons
+    expect(find.text('Translate Mode'), findsOneWidget);
+    expect(find.text('Training Mode'), findsOneWidget);
+    expect(find.text('Dictionary'), findsOneWidget);
   });
 }
