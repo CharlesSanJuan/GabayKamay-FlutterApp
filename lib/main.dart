@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'screens/splash_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/translate_screen.dart';
 import 'screens/training_screen.dart';
@@ -21,6 +22,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'GabayKamay',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
         // This is the theme of your application.
         //
@@ -41,8 +43,10 @@ class MyApp extends StatelessWidget {
           primarySwatch: Colors.blue,
       ),
       // home: const MyHomePage(title: 'Flutter Demo Home Page'),
-      home: const HomeScreen(),
+      initialRoute: '/',
       routes: {
+        '/': (context) => const SplashScreen(),
+        '/home': (context) => const HomeScreen(),
         '/translate': (context) => const TranslateScreen(),
         '/training': (context) => const TrainingScreen(),
         '/dictionary': (context) => const DictionaryScreen(),
