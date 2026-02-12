@@ -50,19 +50,21 @@ class AnimatedSplashLogo extends StatelessWidget {
             opacity: textOpacity,
             child: ClipRect(
               child: Align(
-                alignment: Alignment.centerLeft,
+                alignment: Alignment(0.5, 0), // 🖐 align left edge to center
                 widthFactor: moveProgress.value,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'GabayKamay',
+                      'GabKamay',
                       style: TextStyle(
                         fontSize: logoWidth * 0.09,
                         fontWeight: FontWeight.bold,
                         color: Colors.black,
                         height: 1.0,
+                        fontFamily: 'SF Pro',
+                        letterSpacing: 2,  // ← Adjust value as needed
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -73,6 +75,8 @@ class AnimatedSplashLogo extends StatelessWidget {
                         fontWeight: FontWeight.w500,
                         color: Colors.black,
                         height: 1.1,
+                        fontFamily: 'SF Pro',
+                        letterSpacing: 2,  // ← Adjust value as needed
                       ),
                     ),
                   ],
