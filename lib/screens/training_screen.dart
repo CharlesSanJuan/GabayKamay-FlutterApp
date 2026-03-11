@@ -8,44 +8,72 @@ class TrainingScreen extends StatefulWidget {
 }
 
 class _TrainingScreenState extends State<TrainingScreen> {
+
   final TextEditingController wordController = TextEditingController();
   int samples = 0;
 
   void startRecording() {
     setState(() {
-      samples = 120; // fake number for now
+      samples = 120;
     });
+  }
+
+  void saveGesture() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("Gesture saved successfully!")),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text("Training Mode")),
-      body: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          children: [
-            TextField(
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 40),
+      child: Column(
+        children: [
+
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: const [
+              Icon(Icons.back_hand, size: 50),
+              Icon(Icons.pan_tool_alt, size: 50),
+              Icon(Icons.front_hand, size: 50),
+            ],
+          ),
+
+          const SizedBox(height: 40),
+
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 30),
+            child: TextField(
               controller: wordController,
-              decoration: const InputDecoration(
-                labelText: "Enter word",
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                hintText: "Enter word",
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
               ),
             ),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: startRecording,
-              child: const Text("Start Recording Gesture"),
-            ),
-            const SizedBox(height: 20),
-            Text("Samples recorded: $samples"),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: () {},
-              child: const Text("Save Gesture"),
-            ),
-          ],
-        ),
+          ),
+
+          const SizedBox(height: 25),
+
+          ElevatedButton(
+            onPressed: startRecording,
+            child: const Text("Start recording gestures"),
+          ),
+
+          const SizedBox(height: 20),
+
+          Text("Samples Recorded : $samples"),
+
+          const SizedBox(height: 25),
+
+          ElevatedButton(
+            onPressed: saveGesture,
+            child: const Text("Save gesture"),
+          ),
+        ],
       ),
     );
   }
