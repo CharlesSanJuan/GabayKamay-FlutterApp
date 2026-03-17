@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter_tts/flutter_tts.dart';
 
 class TranslateScreen extends StatefulWidget {
   const TranslateScreen({super.key});
@@ -15,10 +16,13 @@ class _TranslateScreenState extends State<TranslateScreen> {
   int dotCount = 0;
   late Timer dotTimer;
 
+  final FlutterTts flutterTts = FlutterTts();
+
   @override
   void initState() {
     super.initState();
 
+    // animation for waiting text
     dotTimer = Timer.periodic(
       const Duration(milliseconds: 500),
       (timer) {
@@ -29,22 +33,65 @@ class _TranslateScreenState extends State<TranslateScreen> {
         }
       },
     );
+
+    initTTS();
+  }
+
+  Future initTTS() async {
+    await flutterTts.setLanguage("fil-PH");
+    await flutterTts.setPitch(1.1);
+    await flutterTts.setSpeechRate(0.50);
+    await flutterTts.setVolume(1.0);
   }
 
   @override
   void dispose() {
     dotTimer.cancel();
+    flutterTts.stop();
     super.dispose();
   }
 
+  // ⭐ Improve Filipino pronunciation
+  String formatForSpeech(String text) {
+
+    if (text.isEmpty) return text;
+
+    text = text.toLowerCase();
+
+    // capitalize first letter
+    text = text[0].toUpperCase() + text.substring(1);
+
+    // add pause for natural speaking
+    if (!text.endsWith(".")) {
+      text = "$text.";
+    }
+
+    return text;
+  }
+
+  // 🔊 speak function
+  Future speakText(String text) async {
+
+    String cleanText = formatForSpeech(text);
+
+    await flutterTts.speak(cleanText);
+  }
+
+  // 🤟 simulated gesture
   void simulateGesture() {
+
+    String detectedWord = "hello ako nga pala si natoy, nandito"; // change to test
+
     setState(() {
-      translatedText = "HELLO";
+      translatedText = detectedWord;
     });
+
+    speakText(detectedWord);
   }
 
   @override
   Widget build(BuildContext context) {
+
     return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -60,15 +107,26 @@ class _TranslateScreenState extends State<TranslateScreen> {
 
             const SizedBox(height: 20),
 
-            Text(
-              translatedText == "Waiting for gesture"
-                  ? "$translatedText${"." * dotCount}"
-                  : translatedText,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 30,
-                fontWeight: FontWeight.bold,
-              ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+
+                Text(
+                  translatedText == "Waiting for gesture"
+                      ? "$translatedText${"." * dotCount}"
+                      : translatedText,
+                  style: const TextStyle(
+                    fontSize: 32,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+
+                const SizedBox(width: 10),
+
+                
+                
+
+              ],
             ),
 
             const SizedBox(height: 50),
@@ -77,6 +135,7 @@ class _TranslateScreenState extends State<TranslateScreen> {
               onPressed: simulateGesture,
               child: const Text("Simulate Gesture"),
             ),
+
           ],
         ),
       ),
