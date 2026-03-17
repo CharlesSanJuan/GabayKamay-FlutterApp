@@ -1,5 +1,6 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:http/http.dart' as http;
 
 class DictionaryScreen extends StatefulWidget {
   const DictionaryScreen({super.key});
@@ -10,133 +11,93 @@ class DictionaryScreen extends StatefulWidget {
 
 class _DictionaryScreenState extends State<DictionaryScreen> {
 
-  late Future<List<Map<String, dynamic>>> gestures;
+  List data = [];
+  bool isLoading = true;
+  String errorMessage = "";
 
   @override
   void initState() {
     super.initState();
-    gestures = fetchGestures();
+    fetchDictionary();
   }
 
-  Future<List<Map<String, dynamic>>> fetchGestures() async {
+  Future<void> fetchDictionary() async {
 
-    final response = await Supabase.instance.client
-        .from('gesture_dictionary')
-        .select()
-        .order('created_at', ascending: true);
+    final url = Uri.parse(
+      "https://YOUR_PROJECT_ID.supabase.co/rest/v1/gesture_dictionary?select=*"
+    );
 
-    return List<Map<String, dynamic>>.from(response);
+    try {
+      final response = await http.get(
+        url,
+        headers: {
+          "apikey": "YOUR_ANON_PUBLIC_KEY",
+          "Authorization": "Bearer YOUR_ANON_PUBLIC_KEY",
+        },
+      );
+
+      if (response.statusCode == 200) {
+        setState(() {
+          data = jsonDecode(response.body);
+          isLoading = false;
+        });
+      } else {
+        setState(() {
+          errorMessage = "Server error: ${response.statusCode}";
+          isLoading = false;
+        });
+      }
+
+    } catch (e) {
+      setState(() {
+        errorMessage = "Connection error. Check internet or URL.";
+        isLoading = false;
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
 
-    return FutureBuilder<List<Map<String, dynamic>>>(
-      future: gestures,
-      builder: (context, snapshot) {
+    if (isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
 
-        /// Loading
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
+    if (errorMessage.isNotEmpty) {
+      return Center(
+        child: Text(
+          errorMessage,
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: Colors.red),
+        ),
+      );
+    }
 
-        /// Error
-        if (snapshot.hasError) {
-          return Center(
-            child: Text('Error: ${snapshot.error}'),
-          );
-        }
+    if (data.isEmpty) {
+      return const Center(child: Text("No data found"));
+    }
 
-        /// No Data
-        if (!snapshot.hasData || snapshot.data!.isEmpty) {
-          return const Center(
-            child: Text("No gestures found"),
-          );
-        }
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: data.length,
+      itemBuilder: (context, index) {
 
-        final data = snapshot.data!;
+        final item = data[index];
 
-        return ListView.builder(
-          itemCount: data.length,
-          itemBuilder: (context, index) {
-
-            final gesture = data[index];
-
-            return InkWell(
-              onTap: () {
-
-                showDialog(
-                  context: context,
-                  builder: (_) => AlertDialog(
-                    title: Text(gesture['gesture_label'] ?? ''),
-                    content: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-
-                        Text(
-                          "Spoken Word: ${gesture['spoken_word'] ?? ''}",
-                        ),
-
-                        const SizedBox(height: 6),
-
-                        Text(
-                          "Language: ${gesture['language'] ?? ''}",
-                        ),
-
-                        const SizedBox(height: 6),
-
-                        if ((gesture['description'] ?? '').isNotEmpty)
-                          Text(
-                            "Description: ${gesture['description']}",
-                          ),
-                      ],
-                    ),
-                  ),
-                );
-
-              },
-
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 18,
-                ),
-                decoration: const BoxDecoration(
-                  border: Border(
-                    bottom: BorderSide(
-                      color: Colors.black26,
-                    ),
-                  ),
-                ),
-
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-
-                    Text(
-                      gesture['gesture_label'] ?? '',
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-
-                    const SizedBox(height: 4),
-
-                    Text(
-                      gesture['spoken_word'] ?? '',
-                      style: const TextStyle(
-                        fontSize: 14,
-                        letterSpacing: 1,
-                      ),
-                    ),
-
-                  ],
-                ),
-              ),
-            );
-          },
+        return Card(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(15),
+          ),
+          margin: const EdgeInsets.only(bottom: 12),
+          child: ListTile(
+            title: Text(
+              item['word'] ?? "No word",
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            subtitle: Text(
+              item['meaning'] ?? "No meaning",
+            ),
+          ),
         );
       },
     );

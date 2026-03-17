@@ -22,7 +22,8 @@ class _TranslateScreenState extends State<TranslateScreen> {
   void initState() {
     super.initState();
 
-    // animation for waiting text
+    initTTS();
+
     dotTimer = Timer.periodic(
       const Duration(milliseconds: 500),
       (timer) {
@@ -33,15 +34,18 @@ class _TranslateScreenState extends State<TranslateScreen> {
         }
       },
     );
-
-    initTTS();
   }
 
-  Future initTTS() async {
+  Future<void> initTTS() async {
     await flutterTts.setLanguage("fil-PH");
     await flutterTts.setPitch(1.1);
-    await flutterTts.setSpeechRate(0.50);
+    await flutterTts.setSpeechRate(0.45);
     await flutterTts.setVolume(1.0);
+  }
+
+  Future<void> speakText(String text) async {
+    await flutterTts.stop();
+    await flutterTts.speak(text);
   }
 
   @override
@@ -51,93 +55,73 @@ class _TranslateScreenState extends State<TranslateScreen> {
     super.dispose();
   }
 
-  // ⭐ Improve Filipino pronunciation
-  String formatForSpeech(String text) {
-
-    if (text.isEmpty) return text;
-
-    text = text.toLowerCase();
-
-    // capitalize first letter
-    text = text[0].toUpperCase() + text.substring(1);
-
-    // add pause for natural speaking
-    if (!text.endsWith(".")) {
-      text = "$text.";
-    }
-
-    return text;
-  }
-
-  // 🔊 speak function
-  Future speakText(String text) async {
-
-    String cleanText = formatForSpeech(text);
-
-    await flutterTts.speak(cleanText);
-  }
-
-  // 🤟 simulated gesture
   void simulateGesture() {
-
-    String detectedWord = "hello ako nga pala si natoy, nandito"; // change to test
-
     setState(() {
-      translatedText = detectedWord;
+      translatedText =
+          "Ang hindi marunong lumingon sa pinanggalingan ay hindi makararating sa paroroonan.";
     });
-
-    speakText(detectedWord);
   }
 
   @override
   Widget build(BuildContext context) {
+    return Container(
+      color: Colors.grey[200],
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
 
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
+          const Text(
+            "Translated Text:",
+            style: TextStyle(fontSize: 16),
+          ),
 
-            const Text(
-              "Translated Text:",
-              style: TextStyle(fontSize: 16),
-              textAlign: TextAlign.center,
-            ),
+          const SizedBox(height: 20),
 
-            const SizedBox(height: 20),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: SizedBox(
+              height: 120,
+              child: Row(
+                children: [
 
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-
-                Text(
-                  translatedText == "Waiting for gesture"
-                      ? "$translatedText${"." * dotCount}"
-                      : translatedText,
-                  style: const TextStyle(
-                    fontSize: 32,
-                    fontWeight: FontWeight.bold,
+                  Expanded(
+                    child: SingleChildScrollView(
+                      child: Text(
+                        translatedText == "Waiting for gesture"
+                            ? "$translatedText${"." * dotCount}"
+                            : translatedText,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
                   ),
-                ),
 
-                const SizedBox(width: 10),
+                  const SizedBox(width: 10),
 
-                
-                
-
-              ],
+                  IconButton(
+                    icon: const Icon(Icons.volume_up),
+                    iconSize: 30,
+                    onPressed: () {
+                      if (translatedText != "Waiting for gesture") {
+                        speakText(translatedText);
+                      }
+                    },
+                  ),
+                ],
+              ),
             ),
+          ),
 
-            const SizedBox(height: 50),
+          const SizedBox(height: 40),
 
-            ElevatedButton(
-              onPressed: simulateGesture,
-              child: const Text("Simulate Gesture"),
-            ),
-
-          ],
-        ),
+          ElevatedButton(
+            onPressed: simulateGesture,
+            child: const Text("Simulate Gesture"),
+          ),
+        ],
       ),
     );
   }

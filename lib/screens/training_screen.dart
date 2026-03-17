@@ -27,25 +27,25 @@ class _TrainingScreenState extends State<TrainingScreen> {
   @override
   Widget build(BuildContext context) {
 
-    return Padding(
-      padding: const EdgeInsets.only(top: 40),
-      child: Column(
-        children: [
+    return SafeArea(
+      child: SingleChildScrollView(
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+        child: Column(
+          children: [
 
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: const [
-              Icon(Icons.back_hand, size: 50),
-              Icon(Icons.pan_tool_alt, size: 50),
-              Icon(Icons.front_hand, size: 50),
-            ],
-          ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: const [
+                Icon(Icons.back_hand, size: 50),
+                Icon(Icons.pan_tool_alt, size: 50),
+                Icon(Icons.front_hand, size: 50),
+              ],
+            ),
 
-          const SizedBox(height: 40),
+            const SizedBox(height: 40),
 
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 30),
-            child: TextField(
+            TextField(
               controller: wordController,
               decoration: InputDecoration(
                 hintText: "Enter word",
@@ -54,26 +54,29 @@ class _TrainingScreenState extends State<TrainingScreen> {
                 ),
               ),
             ),
-          ),
 
-          const SizedBox(height: 25),
+            const SizedBox(height: 25),
 
-          ElevatedButton(
-            onPressed: startRecording,
-            child: const Text("Start recording gestures"),
-          ),
+            ElevatedButton(
+              onPressed: startRecording,
+              child: const Text("Start recording gestures"),
+            ),
 
-          const SizedBox(height: 20),
+            const SizedBox(height: 20),
 
-          Text("Samples Recorded : $samples"),
+            Text("Samples Recorded : $samples"),
 
-          const SizedBox(height: 25),
+            const SizedBox(height: 25),
 
-          ElevatedButton(
-            onPressed: saveGesture,
-            child: const Text("Save gesture"),
-          ),
-        ],
+            ElevatedButton(
+              onPressed: saveGesture,
+              child: const Text("Save gesture"),
+            ),
+
+            // 👇 EXTRA SPACE so keyboard won't cover content
+            const SizedBox(height: 100),
+          ],
+        ),
       ),
     );
   }
