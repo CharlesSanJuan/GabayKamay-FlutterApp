@@ -65,6 +65,35 @@ class _HomeScreenState extends State<HomeScreen> {
 
             const SizedBox(height: 10),
 
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      icon: const Icon(Icons.bluetooth),
+                      label: const Text('BLE Setup'),
+                      onPressed: () {
+                        Navigator.of(context).pushNamed('/ble_connection');
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      icon: const Icon(Icons.monitor),
+                      label: const Text('BLE Debug'),
+                      onPressed: () {
+                        Navigator.of(context).pushNamed('/ble_debug');
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 10),
+
             // 🔄 PAGES (NO RELOAD)
             Expanded(
               child: IndexedStack(

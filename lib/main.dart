@@ -6,6 +6,8 @@ import 'screens/home_screen.dart';
 import 'screens/translate_screen.dart';
 import 'screens/training_screen.dart';
 import 'screens/dictionary_screen.dart';
+import 'screens/ble_connection_screen.dart';
+import 'screens/ble_debug_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -37,6 +39,8 @@ class MyApp extends StatelessWidget {
         '/translate': (context) => const TranslateScreen(),
         '/training': (context) => const TrainingScreen(),
         '/dictionary': (context) => const DictionaryScreen(),
+        '/ble_connection': (context) => const BleConnectionScreen(),
+        '/ble_debug': (context) => const BleDebugScreen(),
       },
     );
   }
