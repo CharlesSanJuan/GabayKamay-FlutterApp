@@ -3,6 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
+import '../services/glove_calibration_service.dart';
+import '../services/ble_connection_state.dart';
+
 const String leftGloveName = 'GLOVE_LEFT';
 const String rightGloveName = 'GLOVE_RIGHT';
 const String serviceUuidString = '12345678-1234-1234-1234-1234567890ab';
@@ -33,12 +36,17 @@ class _BleDebugScreenState extends State<BleDebugScreen> {
   bool _leftConnected = false;
   bool _rightConnected = false;
 
+  final GloveCalibrationService _calibration = GloveCalibrationService();
+
   StreamSubscription<List<ScanResult>>? _scanSub;
   Timer? _connectionCheckTimer;
 
   // Debug log for displaying in app
   final List<String> _debugLogs = [];
   final ScrollController _logScrollController = ScrollController();
+  
+  // CRITICAL: Only initialize connections once
+  bool _hasInitialized = false;
 
   void _addDebugLog(String message) {
     final timestamp = DateTime.now().toString().substring(11, 19); // HH:MM:SS
@@ -66,22 +74,26 @@ class _BleDebugScreenState extends State<BleDebugScreen> {
 
   String _getName(BluetoothDevice device) {
     final platformName = device.platformName;
-    final name = device.name;
 
-    _addDebugLog('Device name check - platformName: "$platformName", name: "$name"');
+    _addDebugLog('Device name check - platformName: "$platformName"');
 
     if (platformName.isNotEmpty) return platformName;
-    if (name.isNotEmpty) return name;
     return 'Unknown';
   }
 
   @override
   void initState() {
     super.initState();
-    _findAndConnectDevices();
-    _connectionCheckTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      _checkConnections();
-    });
+    // CRITICAL: Only initialize once to prevent reconnection on screen revisit
+    if (!_hasInitialized) {
+      _hasInitialized = true;
+      _findAndConnectDevices();
+      _connectionCheckTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+        _checkConnections();
+      });
+    } else {
+      _addDebugLog('✅ Already initialized, skipping reconnection attempt');
+    }
   }
 
   @override
@@ -252,8 +264,10 @@ class _BleDebugScreenState extends State<BleDebugScreen> {
 
       if (deviceName == leftGloveName) {
         setState(() => _leftConnected = true);
+        BleConnectionState().updateConnectionState(leftGloveName, true);
       } else if (deviceName == rightGloveName) {
         setState(() => _rightConnected = true);
+        BleConnectionState().updateConnectionState(rightGloveName, true);
       }
 
     } catch (e) {
@@ -265,8 +279,12 @@ class _BleDebugScreenState extends State<BleDebugScreen> {
     final String csv = String.fromCharCodes(value);
     _addDebugLog('Raw data from $deviceName: $csv');
 
-    final parsed = _parseData(csv);
+    final parsed = _parseData(csv, deviceName);
     _addDebugLog('Parsed data from $deviceName: $parsed');
+
+    if (parsed != null) {
+      _calibration.updateLatest(deviceName, parsed);
+    }
 
     if (deviceName == leftGloveName) {
       setState(() => _leftData = parsed);
@@ -275,37 +293,48 @@ class _BleDebugScreenState extends State<BleDebugScreen> {
     }
   }
 
-  Map<String, double>? _parseData(String data) {
+  Map<String, double>? _parseData(String data, String gloveName) {
     try {
       final parts = data.split(',');
       if (parts.length < 11) return null;
 
-      // Check for test mode pattern (all flex sensors at 50.0, accel at 0.50, gyro at 10.0)
-      bool isTestMode = false;
-      if (parts.length >= 11) {
-        final testPattern = ['50.0', '50.0', '50.0', '50.0', '50.0', '0.50', '0.50', '0.50', '10.0', '10.0', '10.0'];
-        isTestMode = true;
-        for (int i = 0; i < testPattern.length; i++) {
-          if (parts[i] != testPattern[i]) {
-            isTestMode = false;
-            break;
-          }
+      // Expect raw ADC values from ESP32: 5 flex + 3 accel + 3 gyro
+      final rawFlex = List<double>.generate(5, (i) => double.tryParse(parts[i]) ?? 0.0);
+      final rawAccel = List<double>.generate(3, (i) => double.tryParse(parts[5 + i]) ?? 0.0);
+      final rawGyro = List<double>.generate(3, (i) => double.tryParse(parts[8 + i]) ?? 0.0);
+
+      final calibration = _calibration.getCalibration(gloveName);
+      final calibratedFlex = List<double>.generate(5, (i) {
+        if (calibration.isComplete) {
+          return calibration.mapToPercent(i, rawFlex[i]);
         }
-      }
+        return rawFlex[i]; // raw fallback until calibration is done
+      });
 
       final parsed = {
-        'flex_thumb': double.tryParse(parts[0]) ?? 0.0,
-        'flex_index': double.tryParse(parts[1]) ?? 0.0,
-        'flex_middle': double.tryParse(parts[2]) ?? 0.0,
-        'flex_ring': double.tryParse(parts[3]) ?? 0.0,
-        'flex_pinky': double.tryParse(parts[4]) ?? 0.0,
-        'ax_g': double.tryParse(parts[5]) ?? 0.0,
-        'ay_g': double.tryParse(parts[6]) ?? 0.0,
-        'az_g': double.tryParse(parts[7]) ?? 0.0,
-        'gx_dps': double.tryParse(parts[8]) ?? 0.0,
-        'gy_dps': double.tryParse(parts[9]) ?? 0.0,
-        'gz_dps': double.tryParse(parts[10]) ?? 0.0,
-        'is_test_mode': isTestMode ? 1.0 : 0.0,
+        'flex_thumb_raw': rawFlex[0],
+        'flex_index_raw': rawFlex[1],
+        'flex_middle_raw': rawFlex[2],
+        'flex_ring_raw': rawFlex[3],
+        'flex_pinky_raw': rawFlex[4],
+        'flex_thumb': calibratedFlex[0],
+        'flex_index': calibratedFlex[1],
+        'flex_middle': calibratedFlex[2],
+        'flex_ring': calibratedFlex[3],
+        'flex_pinky': calibratedFlex[4],
+        'ax_raw': rawAccel[0],
+        'ay_raw': rawAccel[1],
+        'az_raw': rawAccel[2],
+        'gx_raw': rawGyro[0],
+        'gy_raw': rawGyro[1],
+        'gz_raw': rawGyro[2],
+        'ax_g': calibration.accelGx(rawAccel[0]),
+        'ay_g': calibration.accelGy(rawAccel[1]),
+        'az_g': calibration.accelGz(rawAccel[2]),
+        'gx_dps': calibration.gyroDpsX(rawGyro[0]),
+        'gy_dps': calibration.gyroDpsY(rawGyro[1]),
+        'gz_dps': calibration.gyroDpsZ(rawGyro[2]),
+        'is_test_mode': 0.0,
       };
 
       return parsed;
@@ -419,18 +448,24 @@ class _BleDebugScreenState extends State<BleDebugScreen> {
     if (_leftDevice != null) {
       try {
         final state = await _leftDevice!.connectionState.first;
-        setState(() => _leftConnected = state == BluetoothConnectionState.connected);
+        final isConnected = state == BluetoothConnectionState.connected;
+        setState(() => _leftConnected = isConnected);
+        BleConnectionState().updateConnectionState(leftGloveName, isConnected);
       } catch (_) {
         setState(() => _leftConnected = false);
+        BleConnectionState().updateConnectionState(leftGloveName, false);
       }
     }
 
     if (_rightDevice != null) {
       try {
         final state = await _rightDevice!.connectionState.first;
-        setState(() => _rightConnected = state == BluetoothConnectionState.connected);
+        final isConnected = state == BluetoothConnectionState.connected;
+        setState(() => _rightConnected = isConnected);
+        BleConnectionState().updateConnectionState(rightGloveName, isConnected);
       } catch (_) {
         setState(() => _rightConnected = false);
+        BleConnectionState().updateConnectionState(rightGloveName, false);
       }
     }
   }
@@ -467,7 +502,7 @@ class _BleDebugScreenState extends State<BleDebugScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: Colors.orange.withOpacity(0.2),
+                  color: Colors.orange.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(4),
                   border: Border.all(color: Colors.orange),
                 ),

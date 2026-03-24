@@ -1,6 +1,4 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 
 class DictionaryScreen extends StatefulWidget {
   const DictionaryScreen({super.key});
@@ -10,79 +8,25 @@ class DictionaryScreen extends StatefulWidget {
 }
 
 class _DictionaryScreenState extends State<DictionaryScreen> {
-
-  List data = [];
-  bool isLoading = true;
-  String errorMessage = "";
-
-  @override
-  void initState() {
-    super.initState();
-    fetchDictionary();
-  }
-
-  Future<void> fetchDictionary() async {
-
-    final url = Uri.parse(
-      "https://YOUR_PROJECT_ID.supabase.co/rest/v1/gesture_dictionary?select=*"
-    );
-
-    try {
-      final response = await http.get(
-        url,
-        headers: {
-          "apikey": "YOUR_ANON_PUBLIC_KEY",
-          "Authorization": "Bearer YOUR_ANON_PUBLIC_KEY",
-        },
-      );
-
-      if (response.statusCode == 200) {
-        setState(() {
-          data = jsonDecode(response.body);
-          isLoading = false;
-        });
-      } else {
-        setState(() {
-          errorMessage = "Server error: ${response.statusCode}";
-          isLoading = false;
-        });
-      }
-
-    } catch (e) {
-      setState(() {
-        errorMessage = "Connection error. Check internet or URL.";
-        isLoading = false;
-      });
-    }
-  }
+  // Local gesture dictionary (no longer using Supabase)
+  final List<Map<String, String>> gestures = [
+    {'word': 'Hello', 'meaning': 'A greeting gesture'},
+    {'word': 'Thank You', 'meaning': 'Expression of gratitude'},
+    {'word': 'Yes', 'meaning': 'Affirmative response'},
+    {'word': 'No', 'meaning': 'Negative response'},
+    {'word': 'Please', 'meaning': 'Polite request'},
+    {'word': 'Sorry', 'meaning': 'Expression of apology'},
+    {'word': 'Goodbye', 'meaning': 'Farewell gesture'},
+    {'word': 'Love', 'meaning': 'Expression of affection'},
+  ];
 
   @override
   Widget build(BuildContext context) {
-
-    if (isLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    if (errorMessage.isNotEmpty) {
-      return Center(
-        child: Text(
-          errorMessage,
-          textAlign: TextAlign.center,
-          style: const TextStyle(color: Colors.red),
-        ),
-      );
-    }
-
-    if (data.isEmpty) {
-      return const Center(child: Text("No data found"));
-    }
-
     return ListView.builder(
       padding: const EdgeInsets.all(16),
-      itemCount: data.length,
+      itemCount: gestures.length,
       itemBuilder: (context, index) {
-
-        final item = data[index];
+        final gesture = gestures[index];
 
         return Card(
           shape: RoundedRectangleBorder(
@@ -91,11 +35,11 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
           margin: const EdgeInsets.only(bottom: 12),
           child: ListTile(
             title: Text(
-              item['word'] ?? "No word",
+              gesture['word'] ?? 'Unknown',
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
             subtitle: Text(
-              item['meaning'] ?? "No meaning",
+              gesture['meaning'] ?? 'No description',
             ),
           ),
         );

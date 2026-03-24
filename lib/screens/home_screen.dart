@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'training_screen.dart';
 import 'translate_screen.dart';
 import 'dictionary_screen.dart';
 import 'calibration_screen.dart';
+import '../services/ble_connection_state.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -16,6 +19,52 @@ class _HomeScreenState extends State<HomeScreen> {
   int currentIndex = 1; // default = Translate
 
   final Color primaryOrange = Colors.orange;
+  final BleConnectionState _bleState = BleConnectionState();
+  
+  late StreamSubscription<BleConnectionUpdate> _connectionSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    
+    // Listen for BLE connection state changes
+    _connectionSubscription = _bleState.connectionStateUpdates.listen((update) {
+      if (!update.isConnected) {
+        // Show disconnect popup
+        _showDisconnectDialog(update.gloveName);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _connectionSubscription.cancel();
+    super.dispose();
+  }
+
+  void _showDisconnectDialog(String gloveName) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('⚠️ Glove Disconnected'),
+        content: Text(
+          '$gloveName has been disconnected.\n\n'
+          'Please reconnect the glove to continue.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              // Navigate to BLE connection screen
+              Navigator.pushNamed(context, '/ble_connection');
+            },
+            child: const Text('Go to BLE Setup'),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -124,10 +173,10 @@ class _HomeScreenState extends State<HomeScreen> {
           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
           children: [
 
-            navItem(Icons.fitness_center, "Training", 0),
-            navItem(Icons.translate, "Translate", 1),
-            navItem(Icons.book, "Dictionary", 2),
-            navItem(Icons.tune, "Calibrate", 3), // ✅ NEW ICON
+            navItem(Icons.fitness_center, "Training", 0, !_bleState.areBothConnected),
+            navItem(Icons.translate, "Translate", 1, !_bleState.areBothConnected),
+            navItem(Icons.book, "Dictionary", 2, !_bleState.areBothConnected),
+            navItem(Icons.tune, "Calibrate", 3, !_bleState.areBothConnected), // ✅ NEW ICON
 
           ],
         ),
@@ -136,38 +185,51 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // 🔹 NAV ITEM WITH ANIMATION
-  Widget navItem(IconData icon, String label, int index) {
+  Widget navItem(IconData icon, String label, int index, bool isDisabled) {
 
     final active = currentIndex == index;
 
     return GestureDetector(
-      onTap: () {
-        setState(() {
-          currentIndex = index;
-        });
-      },
+      onTap: isDisabled
+          ? () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('⚠️ Please connect both gloves first!'),
+                  backgroundColor: Colors.red,
+                  duration: Duration(seconds: 2),
+                ),
+              );
+            }
+          : () {
+              setState(() {
+                currentIndex = index;
+              });
+            },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 300),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
         decoration: BoxDecoration(
-          color: active ? Colors.white : Colors.transparent,
+          color: active && !isDisabled ? Colors.white : Colors.transparent,
           borderRadius: BorderRadius.circular(20),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
 
-            // 🔼 LIFT + SCALE EFFECT
+            // 🔼 LIFT + SCALE EFFECT (with opacity when disabled)
             AnimatedContainer(
               duration: const Duration(milliseconds: 200),
-              transform: Matrix4.translationValues(0, active ? -6 : 0, 0),
+              transform: Matrix4.translationValues(0, active && !isDisabled ? -6 : 0, 0),
               child: AnimatedScale(
-                scale: active ? 1.2 : 1,
+                scale: active && !isDisabled ? 1.2 : 1,
                 duration: const Duration(milliseconds: 200),
                 curve: Curves.easeOutBack,
-                child: Icon(
-                  icon,
-                  color: active ? primaryOrange : Colors.black,
+                child: Opacity(
+                  opacity: isDisabled ? 0.5 : 1.0,
+                  child: Icon(
+                    icon,
+                    color: active && !isDisabled ? primaryOrange : Colors.black,
+                  ),
                 ),
               ),
             ),
@@ -178,8 +240,8 @@ class _HomeScreenState extends State<HomeScreen> {
               label,
               style: TextStyle(
                 fontSize: 11,
-                fontWeight: active ? FontWeight.bold : FontWeight.normal,
-                color: active ? primaryOrange : Colors.black,
+                fontWeight: active && !isDisabled ? FontWeight.bold : FontWeight.normal,
+                color: active && !isDisabled ? primaryOrange : Colors.black,
               ),
             ),
           ],

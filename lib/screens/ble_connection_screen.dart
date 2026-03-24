@@ -3,6 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
+import '../services/glove_calibration_service.dart';
+import '../services/ble_connection_state.dart';
+
 const String leftGloveName = 'GLOVE_LEFT';
 const String rightGloveName = 'GLOVE_RIGHT';
 const String serviceUuidString = '12345678-1234-1234-1234-1234567890ab';
@@ -23,13 +26,14 @@ class _BleConnectionScreenState extends State<BleConnectionScreen> {
   String _getName(BluetoothDevice device) {
     final platformName = device.platformName;
     if (platformName.isNotEmpty) return platformName;
-    if (device.name.isNotEmpty) return device.name;
     return 'Unknown';
   }
 
   bool _isScanning = false;
   bool _leftConnected = false;
   bool _rightConnected = false;
+
+  final GloveCalibrationService _calibration = GloveCalibrationService();
 
   Map<String, dynamic>? _leftData;
   Map<String, dynamic>? _rightData;
@@ -49,6 +53,7 @@ class _BleConnectionScreenState extends State<BleConnectionScreen> {
         final state = await _leftDevice!.connectionState.first;
         if (state == BluetoothConnectionState.connected) {
           setState(() => _leftConnected = true);
+          BleConnectionState().updateConnectionState(leftGloveName, true);
           _setupNotifications(_leftDevice!);
         }
       } catch (_) {}
@@ -59,6 +64,7 @@ class _BleConnectionScreenState extends State<BleConnectionScreen> {
         final state = await _rightDevice!.connectionState.first;
         if (state == BluetoothConnectionState.connected) {
           setState(() => _rightConnected = true);
+          BleConnectionState().updateConnectionState(rightGloveName, true);
           _setupNotifications(_rightDevice!);
         }
       } catch (_) {}
@@ -158,8 +164,10 @@ class _BleConnectionScreenState extends State<BleConnectionScreen> {
     final deviceName = _getName(device);
     if (deviceName == leftGloveName) {
       setState(() => _leftConnected = true);
+      BleConnectionState().updateConnectionState(leftGloveName, true);
     } else if (deviceName == rightGloveName) {
       setState(() => _rightConnected = true);
+      BleConnectionState().updateConnectionState(rightGloveName, true);
     }
   }
 
@@ -178,7 +186,12 @@ class _BleConnectionScreenState extends State<BleConnectionScreen> {
     if (!_leftConnected) {
       await _connectDevice(left);
       await Future.delayed(const Duration(seconds: 1));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Left glove connected'),
+      ));
     } else {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('Left glove already connected'),
       ));
@@ -186,7 +199,12 @@ class _BleConnectionScreenState extends State<BleConnectionScreen> {
 
     if (!_rightConnected) {
       await _connectDevice(right);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Right glove connected'),
+      ));
     } else {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('Right glove already connected'),
       ));
@@ -196,7 +214,11 @@ class _BleConnectionScreenState extends State<BleConnectionScreen> {
   void _onDataReceived(String deviceName, List<int> value) {
     final String csv = String.fromCharCodes(value);
 
-    final parsed = _parseData(csv);
+    final parsed = _parseData(csv, deviceName);
+
+    if (parsed != null) {
+      _calibration.updateLatest(deviceName, parsed);
+    }
 
     if (deviceName == leftGloveName) {
       _leftData = parsed;
@@ -209,22 +231,46 @@ class _BleConnectionScreenState extends State<BleConnectionScreen> {
     }
   }
 
-  Map<String, double>? _parseData(String data) {
+  Map<String, double>? _parseData(String data, String gloveName) {
     try {
       final parts = data.split(',');
       if (parts.length < 11) return null;
+
+      final rawFlex = List<double>.generate(5, (i) => double.tryParse(parts[i]) ?? 0.0);
+      final rawAccel = List<double>.generate(3, (i) => double.tryParse(parts[5 + i]) ?? 0.0);
+      final rawGyro = List<double>.generate(3, (i) => double.tryParse(parts[8 + i]) ?? 0.0);
+
+      final calibration = _calibration.getCalibration(gloveName);
+      final calibratedFlex = List<double>.generate(5, (i) {
+        if (calibration.isComplete) {
+          return calibration.mapToPercent(i, rawFlex[i]);
+        }
+        return rawFlex[i];
+      });
+
       return {
-        'flex_thumb': double.tryParse(parts[0]) ?? 0.0,
-        'flex_index': double.tryParse(parts[1]) ?? 0.0,
-        'flex_middle': double.tryParse(parts[2]) ?? 0.0,
-        'flex_ring': double.tryParse(parts[3]) ?? 0.0,
-        'flex_pinky': double.tryParse(parts[4]) ?? 0.0,
-        'ax_g': double.tryParse(parts[5]) ?? 0.0,
-        'ay_g': double.tryParse(parts[6]) ?? 0.0,
-        'az_g': double.tryParse(parts[7]) ?? 0.0,
-        'gx_dps': double.tryParse(parts[8]) ?? 0.0,
-        'gy_dps': double.tryParse(parts[9]) ?? 0.0,
-        'gz_dps': double.tryParse(parts[10]) ?? 0.0,
+        'flex_thumb_raw': rawFlex[0],
+        'flex_index_raw': rawFlex[1],
+        'flex_middle_raw': rawFlex[2],
+        'flex_ring_raw': rawFlex[3],
+        'flex_pinky_raw': rawFlex[4],
+        'flex_thumb': calibratedFlex[0],
+        'flex_index': calibratedFlex[1],
+        'flex_middle': calibratedFlex[2],
+        'flex_ring': calibratedFlex[3],
+        'flex_pinky': calibratedFlex[4],
+        'ax_raw': rawAccel[0],
+        'ay_raw': rawAccel[1],
+        'az_raw': rawAccel[2],
+        'gx_raw': rawGyro[0],
+        'gy_raw': rawGyro[1],
+        'gz_raw': rawGyro[2],
+        'ax_g': calibration.accelGx(rawAccel[0]),
+        'ay_g': calibration.accelGy(rawAccel[1]),
+        'az_g': calibration.accelGz(rawAccel[2]),
+        'gx_dps': calibration.gyroDpsX(rawGyro[0]),
+        'gy_dps': calibration.gyroDpsY(rawGyro[1]),
+        'gz_dps': calibration.gyroDpsZ(rawGyro[2]),
       };
     } catch (_) {
       return null;
@@ -238,9 +284,11 @@ class _BleConnectionScreenState extends State<BleConnectionScreen> {
   Future<void> _disconnectAll() async {
     if (_leftDevice != null) {
       await _leftDevice!.disconnect();
+      BleConnectionState().updateConnectionState(leftGloveName, false);
     }
     if (_rightDevice != null) {
       await _rightDevice!.disconnect();
+      BleConnectionState().updateConnectionState(rightGloveName, false);
     }
     setState(() {
       _leftConnected = false;

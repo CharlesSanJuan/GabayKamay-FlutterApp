@@ -50,15 +50,22 @@ class MyServerCallbacks: public BLEServerCallbacks {
 #define FLEX_P 36
 
 /* ============================================ */
-/* FLEX SENSOR CALIBRATION */
+/* FLEX SENSOR CALIBRATION (now app-driven) */
 /* ============================================ */
-/* Adjust these based on your sensor readings */
-#define FLEX_MIN 2200   // Fully extended
-#define FLEX_MAX 2400   // Fully bent
+/* We send raw flex ADC values to the app, and the app maps
+   0-100 per user with calibration steps. Inline mapping is
+   still available if needed for compatibility. */
+#define FLEX_MIN 2200   // Fully extended (fallback)
+#define FLEX_MAX 2400   // Fully bent (fallback)
+
+#define SEND_FLEX_AS_RAW 1   // 1 = raw ADC chain to app, 0 = send normalized 0-100
 
 /* ============================================ */
 /* MPU6050 CALIBRATION OFFSETS */
 /* ============================================ */
+int16_t ax_offset = 0;
+int16_t ay_offset = 0;
+int16_t az_offset = 0;
 int16_t gx_offset = 0;
 int16_t gy_offset = 0;
 int16_t gz_offset = 0;
@@ -123,6 +130,9 @@ void calibrateMPU() {
 
   Serial.println("Calibrating MPU... Keep glove still for 2 seconds.");
 
+  long ax_sum = 0;
+  long ay_sum = 0;
+  long az_sum = 0;
   long gx_sum = 0;
   long gy_sum = 0;
   long gz_sum = 0;
@@ -134,6 +144,9 @@ void calibrateMPU() {
 
     mpu.getMotion6(&ax, &ay, &az, &gx_raw, &gy_raw, &gz_raw);
 
+    ax_sum += ax;
+    ay_sum += ay;
+    az_sum += az;
     gx_sum += gx_raw;
     gy_sum += gy_raw;
     gz_sum += gz_raw;
@@ -141,12 +154,18 @@ void calibrateMPU() {
     delay(20);
   }
 
+  ax_offset = ax_sum / 100;
+  ay_offset = ay_sum / 100;
+  az_offset = az_sum / 100;
   gx_offset = gx_sum / 100;
   gy_offset = gy_sum / 100;
   gz_offset = gz_sum / 100;
 
   Serial.print("Calibration complete. Offsets: ");
-  Serial.print("gx="); Serial.print(gx_offset);
+  Serial.print("ax="); Serial.print(ax_offset);
+  Serial.print(" ay="); Serial.print(ay_offset);
+  Serial.print(" az="); Serial.print(az_offset);
+  Serial.print(" gx="); Serial.print(gx_offset);
   Serial.print(" gy="); Serial.print(gy_offset);
   Serial.print(" gz="); Serial.println(gz_offset);
 }
@@ -280,13 +299,6 @@ void loop() {
     int flex_r_raw = analogRead(FLEX_R);
     int flex_p_raw = analogRead(FLEX_P);
 
-    /* Normalize flex sensors to 0-100 */
-    float flex_t = normalizeFlex(flex_t_raw);
-    float flex_i = normalizeFlex(flex_i_raw);
-    float flex_m = normalizeFlex(flex_m_raw);
-    float flex_r = normalizeFlex(flex_r_raw);
-    float flex_p = normalizeFlex(flex_p_raw);
-
     /* ============================================ */
     /* READ MPU6050 */
     /* ============================================ */
@@ -295,43 +307,51 @@ void loop() {
 
     mpu.getMotion6(&ax_raw, &ay_raw, &az_raw, &gx_raw, &gy_raw, &gz_raw);
 
-    /* ============================================ */
-    /* APPLY OFFSETS & CONVERT TO PHYSICAL UNITS */
-    /* ============================================ */
+    String packet;
 
-    /* Accelerometer: convert to g's */
-    float ax_g = ax_raw / ACCEL_SCALE;
-    float ay_g = ay_raw / ACCEL_SCALE;
-    float az_g = az_raw / ACCEL_SCALE;
+    #if SEND_FLEX_AS_RAW
+      /* RAW packet format (all integers):
+         flex_t,flex_i,flex_m,flex_r,flex_p,ax_raw,ay_raw,az_raw,gx_raw,gy_raw,gz_raw
+      */
+      packet = String(flex_t_raw) + "," +
+               String(flex_i_raw) + "," +
+               String(flex_m_raw) + "," +
+               String(flex_r_raw) + "," +
+               String(flex_p_raw) + "," +
+               String(ax_raw) + "," +
+               String(ay_raw) + "," +
+               String(az_raw) + "," +
+               String(gx_raw) + "," +
+               String(gy_raw) + "," +
+               String(gz_raw);
+    #else
+      /* NORMALIZED packet format for backward compatibility */
+      float flex_t = normalizeFlex(flex_t_raw);
+      float flex_i = normalizeFlex(flex_i_raw);
+      float flex_m = normalizeFlex(flex_m_raw);
+      float flex_r = normalizeFlex(flex_r_raw);
+      float flex_p = normalizeFlex(flex_p_raw);
 
-    /* Gyroscope: apply offset, convert to °/s */
-    float gx_dps = (gx_raw - gx_offset) / GYRO_SCALE;
-    float gy_dps = (gy_raw - gy_offset) / GYRO_SCALE;
-    float gz_dps = (gz_raw - gz_offset) / GYRO_SCALE;
+      float ax_g = ax_raw / ACCEL_SCALE;
+      float ay_g = ay_raw / ACCEL_SCALE;
+      float az_g = az_raw / ACCEL_SCALE;
+      float gx_dps = (gx_raw - gx_offset) / GYRO_SCALE;
+      float gy_dps = (gy_raw - gy_offset) / GYRO_SCALE;
+      float gz_dps = (gz_raw - gz_offset) / GYRO_SCALE;
 
-    /* ============================================ */
-    /* BUILD SIMPLIFIED DATA PACKET */
-    /* ============================================ */
-    /* Format: f1,f2,f3,f4,f5,ax,ay,az,gx,gy,gz
-       (11 comma-separated values)
-       
-       Each flex sensor: 0-100 (percentage)
-       Each accel: -2.0 to +2.0 (g's)
-       Each gyro: degrees/second
-    */
-
-    String packet = 
-      formatFloat(flex_t, 1) + "," +
-      formatFloat(flex_i, 1) + "," +
-      formatFloat(flex_m, 1) + "," +
-      formatFloat(flex_r, 1) + "," +
-      formatFloat(flex_p, 1) + "," +
-      formatFloat(ax_g, 2) + "," +
-      formatFloat(ay_g, 2) + "," +
-      formatFloat(az_g, 2) + "," +
-      formatFloat(gx_dps, 1) + "," +
-      formatFloat(gy_dps, 1) + "," +
-      formatFloat(gz_dps, 1);
+      packet = 
+        formatFloat(flex_t, 1) + "," +
+        formatFloat(flex_i, 1) + "," +
+        formatFloat(flex_m, 1) + "," +
+        formatFloat(flex_r, 1) + "," +
+        formatFloat(flex_p, 1) + "," +
+        formatFloat(ax_g, 2) + "," +
+        formatFloat(ay_g, 2) + "," +
+        formatFloat(az_g, 2) + "," +
+        formatFloat(gx_dps, 1) + "," +
+        formatFloat(gy_dps, 1) + "," +
+        formatFloat(gz_dps, 1);
+    #endif
 
     /* ============================================ */
     /* SEND VIA BLE */
