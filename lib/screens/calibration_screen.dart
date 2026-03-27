@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../services/ble_glove_service.dart';
 import '../services/glove_calibration_service.dart';
 
 class CalibrationScreen extends StatefulWidget {
@@ -11,13 +12,13 @@ class CalibrationScreen extends StatefulWidget {
 
 class _CalibrationScreenState extends State<CalibrationScreen>
     with TickerProviderStateMixin {
-
   int step = 0;
   double progress = 0.0;
   bool isCalibrating = false;
   bool isComplete = false;
 
   final GloveCalibrationService _calibration = GloveCalibrationService();
+  final BleGloveService _bleService = BleGloveService();
   final List<String> _calibrationStages = [
     'Relax both hands',
     'Make a fist',
@@ -27,24 +28,13 @@ class _CalibrationScreenState extends State<CalibrationScreen>
 
   late AnimationController pulseController;
   late AnimationController completeController;
-
   late Animation<double> pulseAnimation;
   late Animation<double> completeAnimation;
-
-  final List<String> stepsText = [
-    "Wear both gloves properly",
-    "Keep both hands relaxed",
-    "Close both hands (fist)",
-    "Open both hands fully",
-    "Move fingers slightly",
-    "Calibration complete!"
-  ];
 
   @override
   void initState() {
     super.initState();
 
-    // 🔵 Pulsing animation
     pulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 800),
@@ -54,7 +44,6 @@ class _CalibrationScreenState extends State<CalibrationScreen>
       CurvedAnimation(parent: pulseController, curve: Curves.easeInOut),
     );
 
-    // 🟢 Completion animation
     completeController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 700),
@@ -73,8 +62,16 @@ class _CalibrationScreenState extends State<CalibrationScreen>
   }
 
   void startCalibration() {
-    _calibration.reset();
+    if (!_bleService.snapshot.areBothConnected) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Connect both gloves before starting calibration.'),
+        ),
+      );
+      return;
+    }
 
+    _calibration.reset();
     setState(() {
       isCalibrating = true;
       isComplete = false;
@@ -83,25 +80,26 @@ class _CalibrationScreenState extends State<CalibrationScreen>
     });
 
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Calibration started. Follow instructions and press Capture.')),
+      const SnackBar(
+        content: Text('Calibration started. Follow instructions and press Capture.'),
+      ),
     );
   }
 
   void _captureCalibrationSample() {
     final leftRaw = _calibration.leftRaw;
     final rightRaw = _calibration.rightRaw;
+    const fingers = ['thumb', 'index', 'middle', 'ring', 'pinky'];
 
-    final fingers = ['thumb', 'index', 'middle', 'ring', 'pinky'];
-
-    // Validate we have actual readings from gloves
     if (leftRaw['flex_thumb_raw'] == 0 && rightRaw['flex_thumb_raw'] == 0) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No raw data available yet. Connect gloves and wait for data.')),
+        const SnackBar(
+          content: Text('No raw data available yet. Connect gloves and wait for data.'),
+        ),
       );
       return;
     }
 
-    // Step 0: calibrate IMU zero/bias when hands are relaxed
     if (step == 0) {
       _calibration.left.updateImuBias(
         leftRaw['ax_raw'] ?? 0.0,
@@ -121,7 +119,7 @@ class _CalibrationScreenState extends State<CalibrationScreen>
       );
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('IMU bias captured for both gloves')), 
+        const SnackBar(content: Text('IMU bias captured for both gloves')),
       );
     }
 
@@ -145,17 +143,24 @@ class _CalibrationScreenState extends State<CalibrationScreen>
     if (isComplete) {
       completeController.forward();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Calibration Complete. Using per-user ranges for 0-100 flex.')),
+        const SnackBar(
+          content: Text('Calibration complete. Using per-user ranges for 0-100 flex.'),
+        ),
       );
     }
   }
 
   double _getCalibratedFlex(String gloveName, String finger) {
     final idx = ['thumb', 'index', 'middle', 'ring', 'pinky'].indexOf(finger);
-    if (idx == -1) return 0.0;
+    if (idx == -1) {
+      return 0.0;
+    }
 
     final calibration = _calibration.getCalibration(gloveName);
-    final rawValue = (gloveName == 'GLOVE_LEFT' ? _calibration.leftRaw : _calibration.rightRaw)['flex_${finger}_raw'] ?? 0.0;
+    final rawValue = (gloveName == leftGloveName
+            ? _calibration.leftRaw
+            : _calibration.rightRaw)['flex_${finger}_raw'] ??
+        0.0;
     if (!calibration.isComplete) {
       return rawValue;
     }
@@ -163,7 +168,7 @@ class _CalibrationScreenState extends State<CalibrationScreen>
   }
 
   Widget buildHands() {
-    Widget hands = Row(
+    final hands = Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [
         Transform(
@@ -175,7 +180,6 @@ class _CalibrationScreenState extends State<CalibrationScreen>
       ],
     );
 
-    // 🎉 COMPLETED EFFECT
     if (isComplete) {
       return ScaleTransition(
         scale: completeAnimation,
@@ -190,7 +194,6 @@ class _CalibrationScreenState extends State<CalibrationScreen>
       );
     }
 
-    // 🔵 PULSING EFFECT
     if (isCalibrating) {
       return ScaleTransition(
         scale: pulseAnimation,
@@ -203,148 +206,186 @@ class _CalibrationScreenState extends State<CalibrationScreen>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.grey[100],
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: StreamBuilder<void>(
-            stream: _calibration.updates,
-            builder: (context, snapshot) {
-              return SingleChildScrollView(
-                physics: const BouncingScrollPhysics(),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
+    return StreamBuilder<BleGloveSnapshot>(
+      stream: _bleService.snapshots,
+      initialData: _bleService.snapshot,
+      builder: (context, bleSnapshot) {
+        final bleState = bleSnapshot.data ?? _bleService.snapshot;
 
-            const Text(
-              "Glove Calibration",
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-
-            const SizedBox(height: 30),
-
-            // 🧤 HAND DISPLAY
-            Container(
-              height: 220,
-              width: double.infinity,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Center(child: buildHands()),
-            ),
-
-            const SizedBox(height: 30),
-
-            // 📊 Progress
-            LinearProgressIndicator(
-              value: progress,
-              minHeight: 8,
-            ),
-
-            const SizedBox(height: 20),
-
-            // Current calibration step
-            Text(
-              isComplete ? 'Calibration complete' : _calibrationStages[step],
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 16),
-            ),
-
-            const SizedBox(height: 12),
-
-            // Live sampled values
-            if (!isComplete) ...[
-              Card(
-                margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: const [
-                          Text('Finger'),
-                          Text('LEFT raw'),
-                          Text('RIGHT raw'),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      for (final finger in ['thumb', 'index', 'middle', 'ring', 'pinky'])
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 4),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(finger.toUpperCase()),
-                              Text(_calibration.leftRaw['flex_${finger}_raw']?.toStringAsFixed(0) ?? '0'),
-                              Text(_calibration.rightRaw['flex_${finger}_raw']?.toStringAsFixed(0) ?? '0'),
-                            ],
+        return Scaffold(
+          backgroundColor: Colors.grey[100],
+          body: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: StreamBuilder<void>(
+                stream: _calibration.updates,
+                builder: (context, _) {
+                  return SingleChildScrollView(
+                    physics: const BouncingScrollPhysics(),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Text(
+                          'Glove Calibration',
+                          style: TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-            const SizedBox(height: 20),
-
-            if (!isCalibrating && !isComplete) ...[
-              ElevatedButton(
-                onPressed: startCalibration,
-                child: const Text('Start Calibration'),
-              ),
-            ] else if (isCalibrating) ...[
-              ElevatedButton(
-                onPressed: _captureCalibrationSample,
-                child: Text('Capture "${_calibrationStages[step]}"'),
-              ),
-            ] else if (isComplete) ...[
-              ElevatedButton(
-                onPressed: () {
-                  _calibration.reset();
-                  setState(() {
-                    isCalibrating = false;
-                    isComplete = false;
-                    step = 0;
-                    progress = 0.0;
-                  });
-                },
-                child: const Text('Reset Calibration'),
-              ),
-
-              const SizedBox(height: 16),
-              Card(
-                margin: const EdgeInsets.symmetric(horizontal: 8),
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Calibrated values (0-100):', style: TextStyle(fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 8),
-                      for (final finger in ['thumb', 'index', 'middle', 'ring', 'pinky'])
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 3),
-                          child: Text('${finger.toUpperCase()}: LEFT=${_getCalibratedFlex('GLOVE_LEFT', finger).toStringAsFixed(1)}%, RIGHT=${_getCalibratedFlex('GLOVE_RIGHT', finger).toStringAsFixed(1)}%'),
+                        const SizedBox(height: 8),
+                        Text(
+                          bleState.areBothConnected
+                              ? 'Both gloves connected'
+                              : 'Waiting for both gloves to connect',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: bleState.areBothConnected ? Colors.green : Colors.red,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
-                    ],
-                  ),
-                ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Packets: LEFT ${bleState.leftPacketCount} | RIGHT ${bleState.rightPacketCount}',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(color: Colors.grey),
+                        ),
+                        const SizedBox(height: 30),
+                        Container(
+                          height: 220,
+                          width: double.infinity,
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Center(child: buildHands()),
+                        ),
+                        const SizedBox(height: 30),
+                        LinearProgressIndicator(
+                          value: progress,
+                          minHeight: 8,
+                        ),
+                        const SizedBox(height: 20),
+                        Text(
+                          isComplete ? 'Calibration complete' : _calibrationStages[step],
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(fontSize: 16),
+                        ),
+                        const SizedBox(height: 12),
+                        if (!isComplete)
+                          Card(
+                            margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Column(
+                                children: [
+                                  const Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text('Finger'),
+                                      Text('LEFT raw'),
+                                      Text('RIGHT raw'),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  for (final finger in const [
+                                    'thumb',
+                                    'index',
+                                    'middle',
+                                    'ring',
+                                    'pinky',
+                                  ])
+                                    Padding(
+                                      padding: const EdgeInsets.only(bottom: 4),
+                                      child: Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Text(finger.toUpperCase()),
+                                          Text(
+                                            _calibration.leftRaw['flex_${finger}_raw']
+                                                    ?.toStringAsFixed(0) ??
+                                                '0',
+                                          ),
+                                          Text(
+                                            _calibration.rightRaw['flex_${finger}_raw']
+                                                    ?.toStringAsFixed(0) ??
+                                                '0',
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        const SizedBox(height: 20),
+                        if (!isCalibrating && !isComplete)
+                          ElevatedButton(
+                            onPressed: bleState.areBothConnected ? startCalibration : null,
+                            child: const Text('Start Calibration'),
+                          )
+                        else if (isCalibrating)
+                          ElevatedButton(
+                            onPressed: _captureCalibrationSample,
+                            child: Text('Capture "${_calibrationStages[step]}"'),
+                          )
+                        else
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              ElevatedButton(
+                                onPressed: () {
+                                  _calibration.reset();
+                                  setState(() {
+                                    isCalibrating = false;
+                                    isComplete = false;
+                                    step = 0;
+                                    progress = 0.0;
+                                  });
+                                },
+                                child: const Text('Reset Calibration'),
+                              ),
+                              const SizedBox(height: 16),
+                              Card(
+                                margin: const EdgeInsets.symmetric(horizontal: 8),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(12),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      const Text(
+                                        'Calibrated values (0-100):',
+                                        style: TextStyle(fontWeight: FontWeight.bold),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      for (final finger in const [
+                                        'thumb',
+                                        'index',
+                                        'middle',
+                                        'ring',
+                                        'pinky',
+                                      ])
+                                        Padding(
+                                          padding: const EdgeInsets.only(bottom: 3),
+                                          child: Text(
+                                            '${finger.toUpperCase()}: LEFT=${_getCalibratedFlex(leftGloveName, finger).toStringAsFixed(1)}%, RIGHT=${_getCalibratedFlex(rightGloveName, finger).toStringAsFixed(1)}%',
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                      ],
+                    ),
+                  );
+                },
               ),
-            ],
-          ],
-        ),
-              );
-            },
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

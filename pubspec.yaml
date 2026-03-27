@@ -41,6 +41,12 @@ dependencies:
 
   flutter_tts: ^4.0.2
   flutter_blue_plus: ^1.32.0
+  shared_preferences: ^2.5.3
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/hands1.png"
 
 dev_dependencies:
   flutter_test:
