@@ -493,16 +493,42 @@ class BleGloveService {
   }
 
   void _applyParsedData(String gloveName, Map<String, double> parsed) {
+    final smoothed = _smoothParsedData(
+      previous: gloveName == leftGloveName ? _leftData : _rightData,
+      incoming: parsed,
+    );
     _calibration.updateLatest(gloveName, parsed);
 
     if (gloveName == leftGloveName) {
-      _leftData = parsed;
+      _leftData = smoothed;
       _leftPacketCount += 1;
     } else {
-      _rightData = parsed;
+      _rightData = smoothed;
       _rightPacketCount += 1;
     }
 
     _emit();
+  }
+
+  Map<String, double> _smoothParsedData({
+    required Map<String, double>? previous,
+    required Map<String, double> incoming,
+  }) {
+    if (previous == null) {
+      return Map<String, double>.from(incoming);
+    }
+
+    const flexAlpha = 0.35;
+    const imuAlpha = 0.22;
+
+    final smoothed = <String, double>{};
+    for (final entry in incoming.entries) {
+      final key = entry.key;
+      final current = entry.value;
+      final prior = previous[key] ?? current;
+      final alpha = key.startsWith('flex_') ? flexAlpha : imuAlpha;
+      smoothed[key] = (alpha * current) + ((1 - alpha) * prior);
+    }
+    return smoothed;
   }
 }

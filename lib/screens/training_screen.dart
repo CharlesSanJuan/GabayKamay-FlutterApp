@@ -20,7 +20,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
   final GestureRecognitionService _gestureService = GestureRecognitionService();
 
   StreamSubscription<GestureRecognitionState>? _stateSub;
-  int _targetSamples = 5;
+  int _targetSamples = 10;
 
   @override
   void initState() {
@@ -88,7 +88,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
               ),
               child: Text(
                 areBothConnected
-                    ? 'Gloves connected. Calibrate first, then capture gesture repetitions.'
+                    ? 'Windowed capture is active. Create a draft, get ready, then perform the sign naturally during the capture window.'
                     : 'Both gloves must stay connected before training.',
                 style: TextStyle(
                   color: areBothConnected ? Colors.green.shade800 : Colors.red.shade800,
@@ -121,11 +121,11 @@ class _TrainingScreenState extends State<TrainingScreen> {
             const SizedBox(height: 16),
             Row(
               children: [
-                const Text('Repetitions per gesture:'),
+                const Text('Training windows:'),
                 const SizedBox(width: 12),
                 DropdownButton<int>(
                   value: _targetSamples,
-                  items: const [3, 5, 7, 10]
+                  items: const [5, 10, 15, 20, 30, 40, 50]
                       .map(
                         (count) => DropdownMenuItem<int>(
                           value: count,
@@ -158,10 +158,10 @@ class _TrainingScreenState extends State<TrainingScreen> {
                   : null,
               child: Text(
                 recognitionState.isRecording
-                    ? 'Capturing...'
+                    ? 'Capturing Window...'
                     : draft == null
                         ? 'Create draft first'
-                        : 'Capture Next Repetition',
+                        : 'Capture Next Window',
               ),
             ),
             const SizedBox(height: 12),
@@ -199,7 +199,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
                     Text(
                       draft == null
                           ? 'No active draft'
-                          : 'Captured ${draft.capturedCount}/${draft.targetSamples} repetitions for "${draft.label}".',
+                          : 'Captured ${draft.capturedCount}/${draft.targetSamples} windows for "${draft.label}".',
                     ),
                     const SizedBox(height: 8),
                     Text(
@@ -211,26 +211,27 @@ class _TrainingScreenState extends State<TrainingScreen> {
                 ),
               ),
             ),
-            const SizedBox(height: 20),
-            const Text(
-              'Saved Gestures',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 12),
-            if (recognitionState.gestures.isEmpty)
-              const Text('No trained gestures saved yet.')
-            else
-              ...recognitionState.gestures.map(
-                (gesture) => Card(
-                  child: ListTile(
-                    title: Text(gesture.label),
-                    subtitle: Text(
-                      '${gesture.sampleCount} repetitions saved | Speaks: ${gesture.spokenText}',
+            const SizedBox(height: 16),
+            const Card(
+              child: Padding(
+                padding: EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'How Capture Works',
+                      style: TextStyle(fontWeight: FontWeight.bold),
                     ),
-                  ),
+                    SizedBox(height: 8),
+                    Text('1. Tap capture and use the 3-second countdown to get ready.'),
+                    Text('2. Perform the sign naturally during the capture window.'),
+                    Text('3. The app saves a full motion window, not one frozen snapshot.'),
+                    Text('4. Repeat until you have enough windows, then save and retrain.'),
+                  ],
                 ),
               ),
-            const SizedBox(height: 80),
+            ),
+            const SizedBox(height: 60),
           ],
         ),
       ),

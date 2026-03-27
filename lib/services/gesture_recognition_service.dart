@@ -20,9 +20,9 @@ class PrototypeGestureTrainer implements GestureTrainer {
   GestureModelSnapshot train(List<GestureTrainingSample> samples) {
     if (samples.isEmpty) {
       return GestureModelSnapshot(
-        trainerType: 'prototype_centroid',
+        trainerType: 'prototype_window_classifier',
         featureLength: 0,
-        decisionThreshold: 0.55,
+        decisionThreshold: 0.48,
         trainedAt: DateTime.now(),
         profiles: const [],
       );
@@ -58,9 +58,9 @@ class PrototypeGestureTrainer implements GestureTrainer {
     }).toList();
 
     return GestureModelSnapshot(
-      trainerType: 'prototype_centroid',
+      trainerType: 'prototype_window_classifier',
       featureLength: samples.first.featureVector.length,
-      decisionThreshold: 0.62,
+      decisionThreshold: 0.48,
       trainedAt: DateTime.now(),
       profiles: profiles,
     );
@@ -77,12 +77,16 @@ class PrototypeGestureTrainer implements GestureTrainer {
 
     GestureModelProfile? bestProfile;
     double? bestDistance;
+    double? secondBestDistance;
 
     for (final profile in model.profiles) {
       final distance = _euclideanDistance(profile.centroid, featureVector);
       if (bestDistance == null || distance < bestDistance) {
+        secondBestDistance = bestDistance;
         bestDistance = distance;
         bestProfile = profile;
+      } else if (secondBestDistance == null || distance < secondBestDistance) {
+        secondBestDistance = distance;
       }
     }
 
@@ -91,7 +95,10 @@ class PrototypeGestureTrainer implements GestureTrainer {
     }
 
     final normalizedDistance = bestDistance / model.featureLength;
-    final confidence = 1 / (1 + normalizedDistance);
+    final margin = secondBestDistance == null
+        ? 1.0
+        : ((secondBestDistance - bestDistance) / max(secondBestDistance, 1));
+    final confidence = (1 / (1 + normalizedDistance)) * (0.7 + (0.3 * margin));
     if (confidence < model.decisionThreshold) {
       return null;
     }
@@ -100,7 +107,7 @@ class PrototypeGestureTrainer implements GestureTrainer {
       gestureId: bestProfile.gestureId,
       label: bestProfile.label,
       spokenText: bestProfile.spokenText,
-      confidence: confidence,
+      confidence: confidence.clamp(0.0, 1.0),
       predictedAt: DateTime.now(),
     );
   }
@@ -148,14 +155,29 @@ class GestureRecognitionService {
 
     _initialized = true;
     final repository = await _storageService.loadRepository();
+    final compatibleSamples = _compatibleSamples(repository.samples);
+    final compatibleModel = repository.model != null &&
+            repository.model!.featureLength == _featureExtractor.aggregatedFeatureCount
+        ? repository.model
+        : null;
+
     _state = _state.copyWith(
       isReady: true,
-      statusMessage: repository.model == null
-          ? 'Ready. Connect gloves, calibrate, then collect training samples.'
+      statusMessage: compatibleModel == null
+          ? 'Ready. Connect gloves, calibrate, then collect training windows.'
           : 'Ready. ${repository.gestures.length} trained gestures loaded.',
       gestures: repository.gestures,
-      model: repository.model,
+      model: compatibleModel,
     );
+
+    if (compatibleSamples.length != repository.samples.length) {
+      final cleaned = GestureRepositorySnapshot(
+        samples: compatibleSamples,
+        gestures: repository.gestures,
+        model: compatibleModel,
+      );
+      await _storageService.saveRepository(cleaned);
+    }
 
     await _bleService.ensureInitialized();
     _bleSub = _bleService.snapshots.listen(_handleBleSnapshot);
@@ -169,17 +191,19 @@ class GestureRecognitionService {
   }) async {
     await ensureInitialized();
     if (!_isCalibrationReady()) {
-      _setStatus(
-        'Calibration must be completed for both gloves before training.',
-      );
+      _setStatus('Calibration must be completed for both gloves before training.');
       return;
     }
+
     final trimmedLabel = label.trim();
-    final trimmedSpokenText = spokenText.trim().isEmpty ? trimmedLabel : spokenText.trim();
-    final gestureId = '${trimmedLabel.toLowerCase().replaceAll(' ', '_')}_${DateTime.now().millisecondsSinceEpoch}';
+    final trimmedSpokenText =
+        spokenText.trim().isEmpty ? trimmedLabel : spokenText.trim();
+    final gestureId =
+        '${trimmedLabel.toLowerCase().replaceAll(' ', '_')}_${DateTime.now().millisecondsSinceEpoch}';
 
     _state = _state.copyWith(
-      statusMessage: 'Training draft created for "$trimmedLabel". Capture $targetSamples repetitions.',
+      statusMessage:
+          'Training draft created for "$trimmedLabel". Capture $targetSamples windows.',
       activeDraft: TrainingDraft(
         gestureId: gestureId,
         label: trimmedLabel,
@@ -192,8 +216,9 @@ class GestureRecognitionService {
   }
 
   Future<void> captureTrainingSample({
-    int framesPerSample = 20,
-    Duration timeout = const Duration(seconds: 4),
+    Duration countdown = const Duration(seconds: 3),
+    Duration maxWindow = const Duration(seconds: 8),
+    int minimumFrames = 20,
   }) async {
     final draft = _state.activeDraft;
     if (draft == null) {
@@ -207,16 +232,24 @@ class GestureRecognitionService {
 
     _state = _state.copyWith(
       isRecording: true,
-      statusMessage: 'Capturing repetition ${draft.capturedCount + 1} of ${draft.targetSamples}...',
+      statusMessage:
+          'Get ready for repetition ${draft.capturedCount + 1}. Capture starts soon.',
     );
     _emit();
 
+    await _runCountdown(countdown, prefix: 'Prepare gesture window');
+
     try {
-      final frames = await _collectWindowFrames(
-        requiredFrames: framesPerSample,
-        timeout: timeout,
+      final frames = await _collectGestureWindowFrames(
+        maxWindow: maxWindow,
+        minimumFrames: minimumFrames,
       );
-      final aggregated = _featureExtractor.aggregateWindow(frames);
+      final trimmedFrames = _featureExtractor.trimWindowByActivity(
+        frames,
+        minimumFrames: minimumFrames,
+      );
+      final aggregated = _featureExtractor.aggregateWindow(trimmedFrames);
+
       if (aggregated.isEmpty) {
         _state = _state.copyWith(
           isRecording: false,
@@ -242,7 +275,7 @@ class GestureRecognitionService {
         activeDraft: updatedDraft,
         statusMessage: updatedDraft.isComplete
             ? 'Capture complete. Save and retrain the model.'
-            : 'Captured repetition ${updatedDraft.capturedCount} of ${updatedDraft.targetSamples}.',
+            : 'Captured window ${updatedDraft.capturedCount} of ${updatedDraft.targetSamples}.',
       );
       _emit();
     } catch (e) {
@@ -261,14 +294,17 @@ class GestureRecognitionService {
       return;
     }
     if (draft.capturedSamples.isEmpty) {
-      _setStatus('Capture at least one repetition before saving.');
+      _setStatus('Capture at least one training window before saving.');
       return;
     }
 
     final repository = await _storageService.loadRepository();
-    final retainedSamples =
-        repository.samples.where((sample) => sample.gestureId != draft.gestureId).toList();
+    final compatibleExistingSamples = _compatibleSamples(repository.samples);
+    final retainedSamples = compatibleExistingSamples
+        .where((sample) => sample.gestureId != draft.gestureId)
+        .toList();
     final updatedSamples = [...retainedSamples, ...draft.capturedSamples];
+    final compatibleUpdatedSamples = _compatibleSamples(updatedSamples);
 
     final updatedDefinitions =
         repository.gestures.where((gesture) => gesture.id != draft.gestureId).toList()
@@ -282,9 +318,11 @@ class GestureRecognitionService {
             ),
           );
 
-    final model = _trainer.train(updatedSamples);
+    final model = compatibleUpdatedSamples.isEmpty
+        ? null
+        : _trainer.train(compatibleUpdatedSamples);
     final updatedRepository = GestureRepositorySnapshot(
-      samples: updatedSamples,
+      samples: compatibleUpdatedSamples,
       gestures: updatedDefinitions,
       model: model,
     );
@@ -292,10 +330,37 @@ class GestureRecognitionService {
 
     _state = _state.copyWith(
       statusMessage:
-          'Saved "${draft.label}" with ${draft.capturedSamples.length} repetitions. Model retrained.',
+          'Saved "${draft.label}" with ${draft.capturedSamples.length} windows. Model retrained.',
       gestures: updatedDefinitions,
       model: model,
       clearDraft: true,
+    );
+    _emit();
+  }
+
+  Future<void> deleteGesture(String gestureId) async {
+    final repository = await _storageService.loadRepository();
+    final remainingSamples =
+        repository.samples.where((sample) => sample.gestureId != gestureId).toList();
+    final remainingGestures =
+        repository.gestures.where((gesture) => gesture.id != gestureId).toList();
+
+    final compatibleRemainingSamples = _compatibleSamples(remainingSamples);
+    final model = compatibleRemainingSamples.isEmpty
+        ? null
+        : _trainer.train(compatibleRemainingSamples);
+    final updatedRepository = GestureRepositorySnapshot(
+      samples: compatibleRemainingSamples,
+      gestures: remainingGestures,
+      model: model,
+    );
+    await _storageService.saveRepository(updatedRepository);
+
+    _state = _state.copyWith(
+      gestures: remainingGestures,
+      model: model,
+      statusMessage: 'Gesture deleted and model retrained.',
+      clearPrediction: true,
     );
     _emit();
   }
@@ -319,26 +384,38 @@ class GestureRecognitionService {
     _stateController.close();
   }
 
-  Future<List<List<double>>> _collectWindowFrames({
-    required int requiredFrames,
-    required Duration timeout,
+  Future<void> _runCountdown(Duration duration, {required String prefix}) async {
+    for (var seconds = duration.inSeconds; seconds > 0; seconds--) {
+      _state = _state.copyWith(
+        isRecording: true,
+        statusMessage: '$prefix in $seconds...',
+      );
+      _emit();
+      await Future.delayed(const Duration(seconds: 1));
+    }
+  }
+
+  Future<List<List<double>>> _collectGestureWindowFrames({
+    required Duration maxWindow,
+    required int minimumFrames,
   }) async {
     final frames = <List<double>>[];
     final completer = Completer<List<List<double>>>();
+    final startedAt = DateTime.now();
 
     void pushSnapshot(BleGloveSnapshot snapshot) {
       if (snapshot.leftData == null || snapshot.rightData == null) {
         return;
       }
 
-      frames.add(
-        _featureExtractor.buildFrameVector(
-          left: snapshot.leftData!,
-          right: snapshot.rightData!,
-        ),
+      final frame = _featureExtractor.buildFrameVector(
+        left: snapshot.leftData!,
+        right: snapshot.rightData!,
       );
+      frames.add(frame);
 
-      if (frames.length >= requiredFrames && !completer.isCompleted) {
+      final elapsed = DateTime.now().difference(startedAt);
+      if (elapsed >= maxWindow && !completer.isCompleted) {
         completer.complete(List<List<double>>.from(frames));
       }
     }
@@ -349,7 +426,7 @@ class GestureRecognitionService {
     }
 
     final sub = _bleService.snapshots.listen(pushSnapshot);
-    final timer = Timer(timeout, () {
+    final timer = Timer(maxWindow + const Duration(milliseconds: 250), () {
       if (!completer.isCompleted) {
         completer.complete(List<List<double>>.from(frames));
       }
@@ -358,6 +435,10 @@ class GestureRecognitionService {
     final result = await completer.future;
     await sub.cancel();
     timer.cancel();
+
+    if (result.length < minimumFrames) {
+      return result;
+    }
     return result;
   }
 
@@ -370,30 +451,31 @@ class GestureRecognitionService {
     if (snapshot.leftData == null || snapshot.rightData == null) {
       return;
     }
+
     final frame = _featureExtractor.buildFrameVector(
       left: snapshot.leftData!,
       right: snapshot.rightData!,
     );
     _inferenceFrames.add(frame);
-    if (_inferenceFrames.length > 20) {
+    if (_inferenceFrames.length > 40) {
       _inferenceFrames.removeAt(0);
     }
 
-    if (_state.isRecording) {
-      return;
-    }
-    if (_inferenceFrames.length < 6) {
+    if (_state.isRecording || _inferenceFrames.length < 20) {
       return;
     }
 
     final now = DateTime.now();
     if (_lastPredictionAt != null &&
-        now.difference(_lastPredictionAt!) < const Duration(milliseconds: 900)) {
+        now.difference(_lastPredictionAt!) < const Duration(milliseconds: 700)) {
       return;
     }
 
-    final featureVector =
-        _featureExtractor.aggregateWindow(List<List<double>>.from(_inferenceFrames));
+    final activeWindow = _featureExtractor.trimWindowByActivity(
+      List<List<double>>.from(_inferenceFrames),
+      minimumFrames: 18,
+    );
+    final featureVector = _featureExtractor.aggregateWindow(activeWindow);
     final prediction = _trainer.predict(model, featureVector);
     if (prediction == null) {
       return;
@@ -401,7 +483,7 @@ class GestureRecognitionService {
 
     if (_lastPredictedGestureId == prediction.gestureId &&
         _lastPredictionAt != null &&
-        now.difference(_lastPredictionAt!) < const Duration(seconds: 2)) {
+        now.difference(_lastPredictionAt!) < const Duration(seconds: 1)) {
       return;
     }
 
@@ -423,6 +505,17 @@ class GestureRecognitionService {
   bool _isCalibrationReady() {
     return _calibrationService.getCalibration(leftGloveName).isComplete &&
         _calibrationService.getCalibration(rightGloveName).isComplete;
+  }
+
+  List<GestureTrainingSample> _compatibleSamples(
+    List<GestureTrainingSample> samples,
+  ) {
+    return samples
+        .where(
+          (sample) =>
+              sample.featureVector.length == _featureExtractor.aggregatedFeatureCount,
+        )
+        .toList();
   }
 
   void _emit() {

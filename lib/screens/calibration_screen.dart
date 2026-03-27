@@ -1,7 +1,21 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../services/ble_glove_service.dart';
 import '../services/glove_calibration_service.dart';
+
+class _CalibrationStage {
+  final String title;
+  final String instruction;
+  final bool captureImuBias;
+
+  const _CalibrationStage({
+    required this.title,
+    required this.instruction,
+    this.captureImuBias = false,
+  });
+}
 
 class CalibrationScreen extends StatefulWidget {
   const CalibrationScreen({super.key});
@@ -12,19 +26,36 @@ class CalibrationScreen extends StatefulWidget {
 
 class _CalibrationScreenState extends State<CalibrationScreen>
     with TickerProviderStateMixin {
-  int step = 0;
-  double progress = 0.0;
-  bool isCalibrating = false;
-  bool isComplete = false;
-
   final GloveCalibrationService _calibration = GloveCalibrationService();
   final BleGloveService _bleService = BleGloveService();
-  final List<String> _calibrationStages = [
-    'Relax both hands',
-    'Make a fist',
-    'Open both hands wide',
-    'Move fingers slightly',
+  final List<_CalibrationStage> _stages = const [
+    _CalibrationStage(
+      title: 'Open Hands at Waist Level',
+      instruction:
+          'Hold both hands open, relaxed, and steady at waist level.',
+      captureImuBias: true,
+    ),
+    _CalibrationStage(
+      title: 'Closed Fist',
+      instruction: 'Make a firm fist with both hands and hold still.',
+    ),
+    _CalibrationStage(
+      title: 'Open Wide',
+      instruction: 'Open both hands as wide as possible and hold still.',
+    ),
+    _CalibrationStage(
+      title: 'Slow Finger Motion',
+      instruction: 'Slowly flex and extend the fingers to capture drift range.',
+    ),
   ];
+
+  int _stageIndex = 0;
+  bool _isRunning = false;
+  bool _isComplete = false;
+  double _progress = 0.0;
+  String _statusText = 'Connect both gloves to begin calibration.';
+  int _countdown = 0;
+  double _captureProgress = 0.0;
 
   late AnimationController pulseController;
   late AnimationController completeController;
@@ -61,7 +92,7 @@ class _CalibrationScreenState extends State<CalibrationScreen>
     super.dispose();
   }
 
-  void startCalibration() {
+  Future<void> _startCalibration() async {
     if (!_bleService.snapshot.areBothConnected) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -73,81 +104,190 @@ class _CalibrationScreenState extends State<CalibrationScreen>
 
     _calibration.reset();
     setState(() {
-      isCalibrating = true;
-      isComplete = false;
-      step = 0;
-      progress = 1.0 / _calibrationStages.length;
+      _isRunning = true;
+      _isComplete = false;
+      _stageIndex = 0;
+      _progress = 0.0;
+      _captureProgress = 0.0;
+      _statusText = 'Preparing calibration...';
     });
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Calibration started. Follow instructions and press Capture.'),
-      ),
-    );
+    try {
+      for (var i = 0; i < _stages.length; i++) {
+        final stage = _stages[i];
+        setState(() {
+          _stageIndex = i;
+          _statusText = stage.instruction;
+          _progress = i / _stages.length;
+        });
+
+        await _runCountdown(3);
+        final windows = <_CalibrationWindow>[];
+        final captureRounds = stage.captureImuBias ? 2 : 2;
+
+        for (var round = 0; round < captureRounds; round++) {
+          setState(() {
+            _statusText = '${stage.instruction}\nCapture ${round + 1} of $captureRounds';
+            _captureProgress = 0.0;
+          });
+
+          windows.add(
+            await _collectCalibrationWindow(
+              const Duration(seconds: 5),
+            ),
+          );
+        }
+
+        _applyCalibrationStage(stage, windows);
+        setState(() {
+          _progress = (i + 1) / _stages.length;
+        });
+      }
+
+      setState(() {
+        _isRunning = false;
+        _isComplete = true;
+        _countdown = 0;
+        _captureProgress = 1.0;
+        _statusText = 'Calibration complete.';
+      });
+      await completeController.forward();
+    } catch (e) {
+      setState(() {
+        _isRunning = false;
+        _statusText = 'Calibration failed: $e';
+      });
+    }
   }
 
-  void _captureCalibrationSample() {
-    final leftRaw = _calibration.leftRaw;
-    final rightRaw = _calibration.rightRaw;
-    const fingers = ['thumb', 'index', 'middle', 'ring', 'pinky'];
+  Future<void> _runCountdown(int seconds) async {
+    for (var remaining = seconds; remaining > 0; remaining--) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _countdown = remaining;
+      });
+      await Future.delayed(const Duration(seconds: 1));
+    }
+    if (mounted) {
+      setState(() {
+        _countdown = 0;
+      });
+    }
+  }
 
-    if (leftRaw['flex_thumb_raw'] == 0 && rightRaw['flex_thumb_raw'] == 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No raw data available yet. Connect gloves and wait for data.'),
-        ),
-      );
-      return;
+  Future<_CalibrationWindow> _collectCalibrationWindow(Duration duration) async {
+    final leftFrames = <Map<String, double>>[];
+    final rightFrames = <Map<String, double>>[];
+    final completer = Completer<_CalibrationWindow>();
+
+    void addSnapshot(BleGloveSnapshot snapshot) {
+      if (snapshot.leftData == null || snapshot.rightData == null) {
+        return;
+      }
+      leftFrames.add(Map<String, double>.from(snapshot.leftData!));
+      rightFrames.add(Map<String, double>.from(snapshot.rightData!));
     }
 
-    if (step == 0) {
-      _calibration.left.updateImuBias(
-        leftRaw['ax_raw'] ?? 0.0,
-        leftRaw['ay_raw'] ?? 0.0,
-        leftRaw['az_raw'] ?? 0.0,
-        leftRaw['gx_raw'] ?? 0.0,
-        leftRaw['gy_raw'] ?? 0.0,
-        leftRaw['gz_raw'] ?? 0.0,
-      );
-      _calibration.right.updateImuBias(
-        rightRaw['ax_raw'] ?? 0.0,
-        rightRaw['ay_raw'] ?? 0.0,
-        rightRaw['az_raw'] ?? 0.0,
-        rightRaw['gx_raw'] ?? 0.0,
-        rightRaw['gy_raw'] ?? 0.0,
-        rightRaw['gz_raw'] ?? 0.0,
-      );
+    final current = _bleService.snapshot;
+    addSnapshot(current);
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('IMU bias captured for both gloves')),
-      );
-    }
+    final start = DateTime.now();
+    final sub = _bleService.snapshots.listen((snapshot) {
+      addSnapshot(snapshot);
+      if (!mounted) {
+        return;
+      }
+      final elapsedMs = DateTime.now().difference(start).inMilliseconds;
+      setState(() {
+        _captureProgress = (elapsedMs / duration.inMilliseconds).clamp(0.0, 1.0);
+      });
+    });
 
-    for (var i = 0; i < fingers.length; i++) {
-      final key = 'flex_${fingers[i]}_raw';
-      _calibration.left.updateStepMinMax(i, leftRaw[key] ?? 0.0);
-      _calibration.right.updateStepMinMax(i, rightRaw[key] ?? 0.0);
-    }
-
-    setState(() {
-      if (step < _calibrationStages.length - 1) {
-        step += 1;
-        progress = (step + 1) / _calibrationStages.length;
-      } else {
-        isCalibrating = false;
-        isComplete = true;
-        progress = 1.0;
+    Timer(duration, () {
+      if (!completer.isCompleted) {
+        completer.complete(
+          _CalibrationWindow(leftFrames: leftFrames, rightFrames: rightFrames),
+        );
       }
     });
 
-    if (isComplete) {
-      completeController.forward();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Calibration complete. Using per-user ranges for 0-100 flex.'),
-        ),
+    final result = await completer.future;
+    await sub.cancel();
+    return result;
+  }
+
+  void _applyCalibrationStage(
+    _CalibrationStage stage,
+    List<_CalibrationWindow> windows,
+  ) {
+    const fingers = ['thumb', 'index', 'middle', 'ring', 'pinky'];
+
+    if (stage.captureImuBias) {
+      final leftImu = _averageImu(
+        windows.expand((window) => window.leftFrames).toList(),
+      );
+      final rightImu = _averageImu(
+        windows.expand((window) => window.rightFrames).toList(),
+      );
+
+      _calibration.left.updateImuBias(
+        leftImu['ax_raw'] ?? 0.0,
+        leftImu['ay_raw'] ?? 0.0,
+        leftImu['az_raw'] ?? 0.0,
+        leftImu['gx_raw'] ?? 0.0,
+        leftImu['gy_raw'] ?? 0.0,
+        leftImu['gz_raw'] ?? 0.0,
+      );
+      _calibration.right.updateImuBias(
+        rightImu['ax_raw'] ?? 0.0,
+        rightImu['ay_raw'] ?? 0.0,
+        rightImu['az_raw'] ?? 0.0,
+        rightImu['gx_raw'] ?? 0.0,
+        rightImu['gy_raw'] ?? 0.0,
+        rightImu['gz_raw'] ?? 0.0,
       );
     }
+
+    for (var fingerIndex = 0; fingerIndex < fingers.length; fingerIndex++) {
+      final key = 'flex_${fingers[fingerIndex]}_raw';
+
+      for (final window in windows) {
+        for (final frame in window.leftFrames) {
+          _calibration.left.updateStepMinMax(fingerIndex, frame[key] ?? 0.0);
+        }
+        for (final frame in window.rightFrames) {
+          _calibration.right.updateStepMinMax(fingerIndex, frame[key] ?? 0.0);
+        }
+      }
+    }
+  }
+
+  Map<String, double> _averageImu(List<Map<String, double>> frames) {
+    if (frames.isEmpty) {
+      return const {
+        'ax_raw': 0.0,
+        'ay_raw': 0.0,
+        'az_raw': 0.0,
+        'gx_raw': 0.0,
+        'gy_raw': 0.0,
+        'gz_raw': 0.0,
+      };
+    }
+
+    const keys = ['ax_raw', 'ay_raw', 'az_raw', 'gx_raw', 'gy_raw', 'gz_raw'];
+    final totals = <String, double>{for (final key in keys) key: 0.0};
+
+    for (final frame in frames) {
+      for (final key in keys) {
+        totals[key] = totals[key]! + (frame[key] ?? 0.0);
+      }
+    }
+
+    return {
+      for (final key in keys) key: totals[key]! / frames.length,
+    };
   }
 
   double _getCalibratedFlex(String gloveName, String finger) {
@@ -167,7 +307,7 @@ class _CalibrationScreenState extends State<CalibrationScreen>
     return calibration.mapToPercent(idx, rawValue);
   }
 
-  Widget buildHands() {
+  Widget _buildHands() {
     final hands = Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [
@@ -180,7 +320,7 @@ class _CalibrationScreenState extends State<CalibrationScreen>
       ],
     );
 
-    if (isComplete) {
+    if (_isComplete) {
       return ScaleTransition(
         scale: completeAnimation,
         child: Container(
@@ -194,7 +334,7 @@ class _CalibrationScreenState extends State<CalibrationScreen>
       );
     }
 
-    if (isCalibrating) {
+    if (_isRunning) {
       return ScaleTransition(
         scale: pulseAnimation,
         child: hands,
@@ -227,10 +367,7 @@ class _CalibrationScreenState extends State<CalibrationScreen>
                       children: [
                         const Text(
                           'Glove Calibration',
-                          style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                          ),
+                          style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
                         ),
                         const SizedBox(height: 8),
                         Text(
@@ -249,7 +386,41 @@ class _CalibrationScreenState extends State<CalibrationScreen>
                           textAlign: TextAlign.center,
                           style: const TextStyle(color: Colors.grey),
                         ),
-                        const SizedBox(height: 30),
+                        const SizedBox(height: 20),
+                        Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _stages[_stageIndex].title,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Text(_statusText),
+                                if (_countdown > 0) ...[
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Starting in $_countdown...',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.orange,
+                                    ),
+                                  ),
+                                ],
+                                if (_isRunning) ...[
+                                  const SizedBox(height: 12),
+                                  LinearProgressIndicator(value: _captureProgress),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 20),
                         Container(
                           height: 220,
                           width: double.infinity,
@@ -257,79 +428,64 @@ class _CalibrationScreenState extends State<CalibrationScreen>
                             color: Colors.white,
                             borderRadius: BorderRadius.circular(20),
                           ),
-                          child: Center(child: buildHands()),
+                          child: Center(child: _buildHands()),
                         ),
-                        const SizedBox(height: 30),
-                        LinearProgressIndicator(
-                          value: progress,
-                          minHeight: 8,
-                        ),
+                        const SizedBox(height: 24),
+                        LinearProgressIndicator(value: _progress, minHeight: 8),
                         const SizedBox(height: 20),
-                        Text(
-                          isComplete ? 'Calibration complete' : _calibrationStages[step],
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(fontSize: 16),
-                        ),
-                        const SizedBox(height: 12),
-                        if (!isComplete)
-                          Card(
-                            margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                            child: Padding(
-                              padding: const EdgeInsets.all(12),
-                              child: Column(
-                                children: [
-                                  const Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      Text('Finger'),
-                                      Text('LEFT raw'),
-                                      Text('RIGHT raw'),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 8),
-                                  for (final finger in const [
-                                    'thumb',
-                                    'index',
-                                    'middle',
-                                    'ring',
-                                    'pinky',
-                                  ])
-                                    Padding(
-                                      padding: const EdgeInsets.only(bottom: 4),
-                                      child: Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          Text(finger.toUpperCase()),
-                                          Text(
-                                            _calibration.leftRaw['flex_${finger}_raw']
-                                                    ?.toStringAsFixed(0) ??
-                                                '0',
-                                          ),
-                                          Text(
-                                            _calibration.rightRaw['flex_${finger}_raw']
-                                                    ?.toStringAsFixed(0) ??
-                                                '0',
-                                          ),
-                                        ],
-                                      ),
+                        Card(
+                          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Column(
+                              children: [
+                                const Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text('Finger'),
+                                    Text('LEFT raw'),
+                                    Text('RIGHT raw'),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                for (final finger in const [
+                                  'thumb',
+                                  'index',
+                                  'middle',
+                                  'ring',
+                                  'pinky',
+                                ])
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 4),
+                                    child: Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text(finger.toUpperCase()),
+                                        Text(
+                                          _calibration.leftRaw['flex_${finger}_raw']
+                                                  ?.toStringAsFixed(0) ??
+                                              '0',
+                                        ),
+                                        Text(
+                                          _calibration.rightRaw['flex_${finger}_raw']
+                                                  ?.toStringAsFixed(0) ??
+                                              '0',
+                                        ),
+                                      ],
                                     ),
-                                ],
-                              ),
+                                  ),
+                              ],
                             ),
                           ),
+                        ),
                         const SizedBox(height: 20),
-                        if (!isCalibrating && !isComplete)
+                        if (!_isRunning && !_isComplete)
                           ElevatedButton(
-                            onPressed: bleState.areBothConnected ? startCalibration : null,
-                            child: const Text('Start Calibration'),
+                            onPressed: bleState.areBothConnected ? _startCalibration : null,
+                            child: const Text('Start Automatic Calibration'),
                           )
-                        else if (isCalibrating)
-                          ElevatedButton(
-                            onPressed: _captureCalibrationSample,
-                            child: Text('Capture "${_calibrationStages[step]}"'),
-                          )
-                        else
+                        else if (_isComplete)
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
@@ -337,10 +493,13 @@ class _CalibrationScreenState extends State<CalibrationScreen>
                                 onPressed: () {
                                   _calibration.reset();
                                   setState(() {
-                                    isCalibrating = false;
-                                    isComplete = false;
-                                    step = 0;
-                                    progress = 0.0;
+                                    _isRunning = false;
+                                    _isComplete = false;
+                                    _stageIndex = 0;
+                                    _progress = 0.0;
+                                    _captureProgress = 0.0;
+                                    _statusText =
+                                        'Connect both gloves to begin calibration.';
                                   });
                                 },
                                 child: const Text('Reset Calibration'),
@@ -388,4 +547,14 @@ class _CalibrationScreenState extends State<CalibrationScreen>
       },
     );
   }
+}
+
+class _CalibrationWindow {
+  final List<Map<String, double>> leftFrames;
+  final List<Map<String, double>> rightFrames;
+
+  const _CalibrationWindow({
+    required this.leftFrames,
+    required this.rightFrames,
+  });
 }

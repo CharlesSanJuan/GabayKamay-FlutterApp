@@ -85,100 +85,114 @@ class _TranslateScreenState extends State<TranslateScreen> {
 
     return Container(
       color: Colors.grey[200],
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: areBothConnected ? Colors.green.shade50 : Colors.red.shade50,
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Text(
-              areBothConnected
-                  ? recognitionState.model == null
-                      ? 'Gloves connected. Train at least one gesture to start translating.'
-                      : 'Gloves connected. Live gesture recognition is active.'
-                  : 'Connect both gloves to start live translation.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: areBothConnected ? Colors.green.shade900 : Colors.red.shade900,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-          const SizedBox(height: 24),
-          const Text(
-            'Translated Text:',
-            style: TextStyle(fontSize: 16),
-          ),
-          const SizedBox(height: 20),
-          SizedBox(
-            height: 150,
-            child: Row(
-              children: [
-                Expanded(
-                  child: SingleChildScrollView(
-                    child: Text(
-                      displayedText,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontSize: 28,
-                        fontWeight: FontWeight.bold,
+      child: SafeArea(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight - 40),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color:
+                            areBothConnected ? Colors.green.shade50 : Colors.red.shade50,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Text(
+                        areBothConnected
+                            ? recognitionState.model == null
+                                ? 'Gloves connected. Train at least one gesture to start translating.'
+                                : 'Gloves connected. Live windowed gesture recognition is active.'
+                            : 'Connect both gloves to start live translation.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: areBothConnected
+                              ? Colors.green.shade900
+                              : Colors.red.shade900,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
-                  ),
+                    const SizedBox(height: 24),
+                    const Text(
+                      'Translated Text:',
+                      style: TextStyle(fontSize: 16),
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Container(
+                            constraints: const BoxConstraints(minHeight: 120),
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            child: Text(
+                              displayedText,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                fontSize: 28,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        IconButton(
+                          icon: const Icon(Icons.volume_up),
+                          iconSize: 30,
+                          onPressed: prediction == null
+                              ? null
+                              : () async {
+                                  await _speakText(prediction.spokenText);
+                                },
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Status: ${recognitionState.statusMessage}'),
+                            const SizedBox(height: 8),
+                            Text(
+                              prediction == null
+                                  ? 'No confident prediction yet.'
+                                  : 'Recognized label: ${prediction.label} (${(prediction.confidence * 100).toStringAsFixed(0)}%)',
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              recognitionState.model == null
+                                  ? 'Model: not trained'
+                                  : 'Model: ${recognitionState.model!.trainerType} | Gestures: ${recognitionState.gestures.length}',
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    ElevatedButton(
+                      onPressed: () async {
+                        await _gestureService.clearPrediction();
+                        setState(() {
+                          _lastSpokenPrediction = null;
+                        });
+                      },
+                      child: const Text('Clear Latest Translation'),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 10),
-                IconButton(
-                  icon: const Icon(Icons.volume_up),
-                  iconSize: 30,
-                  onPressed: prediction == null
-                      ? null
-                      : () async {
-                          await _speakText(prediction.spokenText);
-                        },
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 20),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Status: ${recognitionState.statusMessage}'),
-                  const SizedBox(height: 8),
-                  Text(
-                    prediction == null
-                        ? 'No confident prediction yet.'
-                        : 'Recognized label: ${prediction.label} (${(prediction.confidence * 100).toStringAsFixed(0)}%)',
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    recognitionState.model == null
-                        ? 'Model: not trained'
-                        : 'Model: ${recognitionState.model!.trainerType} | Gestures: ${recognitionState.gestures.length}',
-                  ),
-                ],
               ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          ElevatedButton(
-            onPressed: () async {
-              await _gestureService.clearPrediction();
-              setState(() {
-                _lastSpokenPrediction = null;
-              });
-            },
-            child: const Text('Clear Latest Translation'),
-          ),
-        ],
+            );
+          },
+        ),
       ),
     );
   }
