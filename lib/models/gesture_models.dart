@@ -4,6 +4,7 @@ class GestureTrainingSample {
   final String gestureId;
   final String label;
   final String spokenText;
+  final bool isDynamic;
   final List<double> featureVector;
   final DateTime createdAt;
 
@@ -11,6 +12,7 @@ class GestureTrainingSample {
     required this.gestureId,
     required this.label,
     required this.spokenText,
+    required this.isDynamic,
     required this.featureVector,
     required this.createdAt,
   });
@@ -19,6 +21,7 @@ class GestureTrainingSample {
         'gestureId': gestureId,
         'label': label,
         'spokenText': spokenText,
+        'isDynamic': isDynamic,
         'featureVector': featureVector,
         'createdAt': createdAt.toIso8601String(),
       };
@@ -28,6 +31,7 @@ class GestureTrainingSample {
       gestureId: json['gestureId'] as String,
       label: json['label'] as String,
       spokenText: json['spokenText'] as String,
+      isDynamic: json['isDynamic'] as bool? ?? false,
       featureVector: (json['featureVector'] as List<dynamic>)
           .map((value) => (value as num).toDouble())
           .toList(),
@@ -40,6 +44,7 @@ class GestureDefinition {
   final String id;
   final String label;
   final String spokenText;
+  final bool isDynamic;
   final int sampleCount;
   final DateTime updatedAt;
 
@@ -47,6 +52,7 @@ class GestureDefinition {
     required this.id,
     required this.label,
     required this.spokenText,
+    required this.isDynamic,
     required this.sampleCount,
     required this.updatedAt,
   });
@@ -55,6 +61,7 @@ class GestureDefinition {
         'id': id,
         'label': label,
         'spokenText': spokenText,
+        'isDynamic': isDynamic,
         'sampleCount': sampleCount,
         'updatedAt': updatedAt.toIso8601String(),
       };
@@ -64,8 +71,70 @@ class GestureDefinition {
       id: json['id'] as String,
       label: json['label'] as String,
       spokenText: json['spokenText'] as String,
+      isDynamic: json['isDynamic'] as bool? ?? false,
       sampleCount: json['sampleCount'] as int,
       updatedAt: DateTime.parse(json['updatedAt'] as String),
+    );
+  }
+}
+
+class RandomForestNodeSnapshot {
+  final bool isLeaf;
+  final int featureIndex;
+  final double threshold;
+  final Map<String, double> probabilities;
+  final RandomForestNodeSnapshot? left;
+  final RandomForestNodeSnapshot? right;
+
+  const RandomForestNodeSnapshot({
+    required this.isLeaf,
+    required this.featureIndex,
+    required this.threshold,
+    required this.probabilities,
+    this.left,
+    this.right,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'isLeaf': isLeaf,
+        'featureIndex': featureIndex,
+        'threshold': threshold,
+        'probabilities': probabilities,
+        'left': left?.toJson(),
+        'right': right?.toJson(),
+      };
+
+  factory RandomForestNodeSnapshot.fromJson(Map<String, dynamic> json) {
+    return RandomForestNodeSnapshot(
+      isLeaf: json['isLeaf'] as bool? ?? false,
+      featureIndex: json['featureIndex'] as int? ?? -1,
+      threshold: (json['threshold'] as num?)?.toDouble() ?? 0,
+      probabilities: (json['probabilities'] as Map<String, dynamic>? ?? const {})
+          .map((key, value) => MapEntry(key, (value as num).toDouble())),
+      left: json['left'] == null
+          ? null
+          : RandomForestNodeSnapshot.fromJson(json['left'] as Map<String, dynamic>),
+      right: json['right'] == null
+          ? null
+          : RandomForestNodeSnapshot.fromJson(json['right'] as Map<String, dynamic>),
+    );
+  }
+}
+
+class RandomForestTreeSnapshot {
+  final RandomForestNodeSnapshot root;
+
+  const RandomForestTreeSnapshot({
+    required this.root,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'root': root.toJson(),
+      };
+
+  factory RandomForestTreeSnapshot.fromJson(Map<String, dynamic> json) {
+    return RandomForestTreeSnapshot(
+      root: RandomForestNodeSnapshot.fromJson(json['root'] as Map<String, dynamic>),
     );
   }
 }
@@ -74,20 +143,20 @@ class GestureModelProfile {
   final String gestureId;
   final String label;
   final String spokenText;
-  final List<double> centroid;
+  final bool isDynamic;
 
   const GestureModelProfile({
     required this.gestureId,
     required this.label,
     required this.spokenText,
-    required this.centroid,
+    required this.isDynamic,
   });
 
   Map<String, dynamic> toJson() => {
         'gestureId': gestureId,
         'label': label,
         'spokenText': spokenText,
-        'centroid': centroid,
+        'isDynamic': isDynamic,
       };
 
   factory GestureModelProfile.fromJson(Map<String, dynamic> json) {
@@ -95,8 +164,7 @@ class GestureModelProfile {
       gestureId: json['gestureId'] as String,
       label: json['label'] as String,
       spokenText: json['spokenText'] as String,
-      centroid:
-          (json['centroid'] as List<dynamic>).map((v) => (v as num).toDouble()).toList(),
+      isDynamic: json['isDynamic'] as bool? ?? false,
     );
   }
 }
@@ -107,6 +175,7 @@ class GestureModelSnapshot {
   final double decisionThreshold;
   final DateTime trainedAt;
   final List<GestureModelProfile> profiles;
+  final List<RandomForestTreeSnapshot> trees;
 
   const GestureModelSnapshot({
     required this.trainerType,
@@ -114,9 +183,10 @@ class GestureModelSnapshot {
     required this.decisionThreshold,
     required this.trainedAt,
     required this.profiles,
+    required this.trees,
   });
 
-  bool get hasProfiles => profiles.isNotEmpty;
+  bool get hasProfiles => trees.isNotEmpty;
 
   Map<String, dynamic> toJson() => {
         'trainerType': trainerType,
@@ -124,6 +194,7 @@ class GestureModelSnapshot {
         'decisionThreshold': decisionThreshold,
         'trainedAt': trainedAt.toIso8601String(),
         'profiles': profiles.map((profile) => profile.toJson()).toList(),
+        'trees': trees.map((tree) => tree.toJson()).toList(),
       };
 
   factory GestureModelSnapshot.fromJson(Map<String, dynamic> json) {
@@ -132,8 +203,11 @@ class GestureModelSnapshot {
       featureLength: json['featureLength'] as int,
       decisionThreshold: (json['decisionThreshold'] as num).toDouble(),
       trainedAt: DateTime.parse(json['trainedAt'] as String),
-      profiles: (json['profiles'] as List<dynamic>)
+      profiles: (json['profiles'] as List<dynamic>? ?? const [])
           .map((item) => GestureModelProfile.fromJson(item as Map<String, dynamic>))
+          .toList(),
+      trees: (json['trees'] as List<dynamic>? ?? const [])
+          .map((item) => RandomForestTreeSnapshot.fromJson(item as Map<String, dynamic>))
           .toList(),
     );
   }
@@ -159,6 +233,7 @@ class TrainingDraft {
   final String gestureId;
   final String label;
   final String spokenText;
+  final bool isDynamic;
   final int targetSamples;
   final List<GestureTrainingSample> capturedSamples;
 
@@ -166,6 +241,7 @@ class TrainingDraft {
     required this.gestureId,
     required this.label,
     required this.spokenText,
+    required this.isDynamic,
     required this.targetSamples,
     required this.capturedSamples,
   });
@@ -177,6 +253,7 @@ class TrainingDraft {
     String? gestureId,
     String? label,
     String? spokenText,
+    bool? isDynamic,
     int? targetSamples,
     List<GestureTrainingSample>? capturedSamples,
   }) {
@@ -184,6 +261,7 @@ class TrainingDraft {
       gestureId: gestureId ?? this.gestureId,
       label: label ?? this.label,
       spokenText: spokenText ?? this.spokenText,
+      isDynamic: isDynamic ?? this.isDynamic,
       targetSamples: targetSamples ?? this.targetSamples,
       capturedSamples: capturedSamples ?? this.capturedSamples,
     );
@@ -228,6 +306,9 @@ class GestureRepositorySnapshot {
 class GestureRecognitionState {
   final bool isReady;
   final bool isRecording;
+  final double captureProgress;
+  final int countdownValue;
+  final bool isPresentationActive;
   final String statusMessage;
   final TrainingDraft? activeDraft;
   final List<GestureDefinition> gestures;
@@ -237,6 +318,9 @@ class GestureRecognitionState {
   const GestureRecognitionState({
     required this.isReady,
     required this.isRecording,
+    required this.captureProgress,
+    required this.countdownValue,
+    required this.isPresentationActive,
     required this.statusMessage,
     required this.activeDraft,
     required this.gestures,
@@ -247,6 +331,9 @@ class GestureRecognitionState {
   GestureRecognitionState copyWith({
     bool? isReady,
     bool? isRecording,
+    double? captureProgress,
+    int? countdownValue,
+    bool? isPresentationActive,
     String? statusMessage,
     TrainingDraft? activeDraft,
     bool clearDraft = false,
@@ -258,6 +345,9 @@ class GestureRecognitionState {
     return GestureRecognitionState(
       isReady: isReady ?? this.isReady,
       isRecording: isRecording ?? this.isRecording,
+      captureProgress: captureProgress ?? this.captureProgress,
+      countdownValue: countdownValue ?? this.countdownValue,
+      isPresentationActive: isPresentationActive ?? this.isPresentationActive,
       statusMessage: statusMessage ?? this.statusMessage,
       activeDraft: clearDraft ? null : (activeDraft ?? this.activeDraft),
       gestures: gestures ?? this.gestures,
@@ -271,6 +361,9 @@ class GestureRecognitionState {
     return const GestureRecognitionState(
       isReady: false,
       isRecording: false,
+      captureProgress: 0,
+      countdownValue: 0,
+      isPresentationActive: false,
       statusMessage: 'Model not initialized',
       activeDraft: null,
       gestures: [],

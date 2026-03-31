@@ -16,7 +16,7 @@ class GestureFeatureExtractor {
   ];
 
   int get rawFeatureCount => _orderedKeys.length * 2;
-  int get aggregatedFeatureCount => rawFeatureCount * 7;
+  int get aggregatedFeatureCount => rawFeatureCount * 12;
 
   List<double> buildFrameVector({
     required Map<String, double> left,
@@ -38,10 +38,17 @@ class GestureFeatureExtractor {
     final minimums = List<double>.filled(featureLength, double.infinity);
     final maximums = List<double>.filled(featureLength, double.negativeInfinity);
     final sumsOfSquares = List<double>.filled(featureLength, 0);
+    final meanAbsoluteDeltas = List<double>.filled(featureLength, 0);
     final starts = List<double>.from(frames.first);
     final ends = List<double>.from(frames.last);
+    final earlyMeans = List<double>.filled(featureLength, 0);
+    final middleMeans = List<double>.filled(featureLength, 0);
+    final lateMeans = List<double>.filled(featureLength, 0);
 
-    for (final frame in frames) {
+    final third = (frames.length / 3).ceil();
+
+    for (var frameIndex = 0; frameIndex < frames.length; frameIndex++) {
+      final frame = frames[frameIndex];
       for (var i = 0; i < featureLength; i++) {
         final value = frame[i];
         means[i] += value;
@@ -52,28 +59,55 @@ class GestureFeatureExtractor {
         if (value > maximums[i]) {
           maximums[i] = value;
         }
+
+        if (frameIndex < third) {
+          earlyMeans[i] += value;
+        } else if (frameIndex < third * 2) {
+          middleMeans[i] += value;
+        } else {
+          lateMeans[i] += value;
+        }
+
+        if (frameIndex > 0) {
+          meanAbsoluteDeltas[i] += (value - frames[frameIndex - 1][i]).abs();
+        }
       }
     }
 
     final count = frames.length.toDouble();
+    final earlyCount = third.clamp(1, frames.length).toDouble();
+    final middleCount =
+        (frames.length > third ? (frames.length - third).clamp(1, third) : 1).toDouble();
+    final lateCount = (frames.length - (third * 2)).clamp(1, frames.length).toDouble();
     final deltas = List<double>.filled(featureLength, 0);
+    final ranges = List<double>.filled(featureLength, 0);
     final standardDeviations = List<double>.filled(featureLength, 0);
 
     for (var i = 0; i < featureLength; i++) {
       means[i] = means[i] / count;
       deltas[i] = ends[i] - starts[i];
+      ranges[i] = maximums[i] - minimums[i];
       final variance = (sumsOfSquares[i] / count) - (means[i] * means[i]);
       standardDeviations[i] = sqrt(max(0, variance));
+      meanAbsoluteDeltas[i] = meanAbsoluteDeltas[i] / max(1, frames.length - 1);
+      earlyMeans[i] = earlyMeans[i] / earlyCount;
+      middleMeans[i] = middleMeans[i] / middleCount;
+      lateMeans[i] = lateMeans[i] / lateCount;
     }
 
     return [
       ...means,
       ...minimums,
       ...maximums,
+      ...ranges,
       ...starts,
       ...ends,
       ...deltas,
       ...standardDeviations,
+      ...meanAbsoluteDeltas,
+      ...earlyMeans,
+      ...middleMeans,
+      ...lateMeans,
     ];
   }
 
@@ -91,8 +125,8 @@ class GestureFeatureExtractor {
 
   List<List<double>> trimWindowByActivity(
     List<List<double>> frames, {
-    double startThreshold = 2.5,
-    double stopThreshold = 1.1,
+    double startThreshold = 1.6,
+    double stopThreshold = 0.65,
     int paddingFrames = 6,
     int minimumFrames = 15,
   }) {
@@ -136,5 +170,59 @@ class GestureFeatureExtractor {
       return trimmed.sublist(max(0, trimmed.length - minimumFrames));
     }
     return trimmed;
+  }
+
+  bool isPresentationActive(
+    List<List<double>> frames, {
+    double gyroThreshold = 0.18,
+    double flexThreshold = 6.0,
+    double accelerationThreshold = 0.12,
+    double poseThreshold = 35.0,
+  }) {
+    if (frames.length < 6) {
+      return false;
+    }
+
+    final aggregated = aggregateWindow(frames);
+    if (aggregated.length != aggregatedFeatureCount) {
+      return false;
+    }
+
+    final meansOffset = 0;
+    final rangesOffset = rawFeatureCount * 3;
+    final stdOffset = rawFeatureCount * 7;
+    final absDeltaOffset = rawFeatureCount * 8;
+
+    double gyroActivity = 0.0;
+    double flexActivity = 0.0;
+    double accelerationActivity = 0.0;
+    double poseEnergy = 0.0;
+
+    for (var gloveOffset = 0; gloveOffset < rawFeatureCount; gloveOffset += 11) {
+      poseEnergy += aggregated[meansOffset + gloveOffset].abs();
+      poseEnergy += aggregated[meansOffset + gloveOffset + 1].abs();
+      poseEnergy += aggregated[meansOffset + gloveOffset + 2].abs();
+      poseEnergy += aggregated[meansOffset + gloveOffset + 3].abs();
+      poseEnergy += aggregated[meansOffset + gloveOffset + 4].abs();
+
+      flexActivity += aggregated[rangesOffset + gloveOffset];
+      flexActivity += aggregated[rangesOffset + gloveOffset + 1];
+      flexActivity += aggregated[rangesOffset + gloveOffset + 2];
+      flexActivity += aggregated[rangesOffset + gloveOffset + 3];
+      flexActivity += aggregated[rangesOffset + gloveOffset + 4];
+
+      accelerationActivity += aggregated[stdOffset + gloveOffset + 5].abs();
+      accelerationActivity += aggregated[stdOffset + gloveOffset + 6].abs();
+      accelerationActivity += aggregated[stdOffset + gloveOffset + 7].abs();
+
+      gyroActivity += aggregated[absDeltaOffset + gloveOffset + 8].abs();
+      gyroActivity += aggregated[absDeltaOffset + gloveOffset + 9].abs();
+      gyroActivity += aggregated[absDeltaOffset + gloveOffset + 10].abs();
+    }
+
+    return gyroActivity >= gyroThreshold ||
+        flexActivity >= flexThreshold ||
+        accelerationActivity >= accelerationThreshold ||
+        poseEnergy >= poseThreshold;
   }
 }

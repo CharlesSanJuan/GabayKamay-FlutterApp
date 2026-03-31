@@ -1,6 +1,8 @@
 import 'dart:async';
 
 class GloveCalibration {
+  static const double minimumReliableFlexSpan = 140.0;
+
   /// Per-finger min/max from a real person (raw ADC 0-4095 or similar)
   final List<double> minRaw = List<double>.filled(5, double.maxFinite);
   final List<double> maxRaw = List<double>.filled(5, double.minPositive);
@@ -54,7 +56,10 @@ class GloveCalibration {
     final minVal = minRaw[fingerIndex];
     final maxVal = maxRaw[fingerIndex];
     if (minVal >= maxVal) return 0.0;
-    final normalized = ((rawValue - minVal) / (maxVal - minVal)) * 100.0;
+    final effectiveSpan = (maxVal - minVal) < minimumReliableFlexSpan
+        ? minimumReliableFlexSpan
+        : (maxVal - minVal);
+    final normalized = ((rawValue - minVal) / effectiveSpan) * 100.0;
     return normalized.clamp(0.0, 100.0);
   }
 }

@@ -83,7 +83,10 @@ unsigned long packetCount = 0;
  * 
  * This staggers transmissions to avoid interference.
  */
-#define TRANSMISSION_OFFSET 0  // Change to 25 for RIGHT glove
+#define TRANSMISSION_OFFSET 0  // Change to 10 for RIGHT glove
+#define SEND_INTERVAL_MS 25
+#define DEBUG_EVERY_N_PACKETS 10
+#define SEND_BINARY_PACKET 1
 
 /* ============================================ */
 /* TEST MODE SETUP */
@@ -122,6 +125,20 @@ float normalizeFlex(int rawValue) {
 String formatFloat(float value, int decimals) {
   return String(value, decimals);
 }
+
+struct __attribute__((packed)) SensorPacket {
+  int16_t flex_t;
+  int16_t flex_i;
+  int16_t flex_m;
+  int16_t flex_r;
+  int16_t flex_p;
+  int16_t ax;
+  int16_t ay;
+  int16_t az;
+  int16_t gx;
+  int16_t gy;
+  int16_t gz;
+};
 
 /* ======================== */
 /* MPU CALIBRATION */
@@ -266,7 +283,7 @@ void loop() {
   }
 
   /* Send at ~20Hz (50ms interval) with offset - SLOWER FOR STABILITY */
-  if (deviceConnected && millis() - lastSend > (50 + TRANSMISSION_OFFSET)) {
+  if (deviceConnected && millis() - lastSend >= (SEND_INTERVAL_MS + TRANSMISSION_OFFSET)) {
 
     lastSend = millis();
 
@@ -274,16 +291,21 @@ void loop() {
     /* ============================================ */
     /* TEST MODE - Send dummy data */
     /* ============================================ */
-    String packet = "50.0,50.0,50.0,50.0,50.0,0.50,0.50,0.50,10.0,10.0,10.0"; // 5 flex (0-100), 3 accel (g), 3 gyro (deg/s)
+    SensorPacket testPacket = {
+      2500, 2500, 2500, 2500, 2500,
+      8192, 8192, 8192,
+      1310, 1310, 1310
+    };
 
-    pCharacteristic->setValue(packet.c_str());
+    pCharacteristic->setValue((uint8_t*)&testPacket, sizeof(testPacket));
     pCharacteristic->notify();
 
-    Serial.print(DEVICE_NAME);
-    Serial.print(" | TEST MODE | Packet #");
-    Serial.print(++packetCount);
-    Serial.print(" | Data: ");
-    Serial.println(packet);
+    packetCount++;
+    if ((packetCount % DEBUG_EVERY_N_PACKETS) == 0) {
+      Serial.print(DEVICE_NAME);
+      Serial.print(" | TEST MODE | Packet #");
+      Serial.println(packetCount);
+    }
 
     } else {
     /* ============================================ */
@@ -307,66 +329,77 @@ void loop() {
 
     mpu.getMotion6(&ax_raw, &ay_raw, &az_raw, &gx_raw, &gy_raw, &gz_raw);
 
-    String packet;
-
-    #if SEND_FLEX_AS_RAW
-      /* RAW packet format (all integers):
-         flex_t,flex_i,flex_m,flex_r,flex_p,ax_raw,ay_raw,az_raw,gx_raw,gy_raw,gz_raw
-      */
-      packet = String(flex_t_raw) + "," +
-               String(flex_i_raw) + "," +
-               String(flex_m_raw) + "," +
-               String(flex_r_raw) + "," +
-               String(flex_p_raw) + "," +
-               String(ax_raw) + "," +
-               String(ay_raw) + "," +
-               String(az_raw) + "," +
-               String(gx_raw) + "," +
-               String(gy_raw) + "," +
-               String(gz_raw);
+    #if SEND_BINARY_PACKET
+      SensorPacket packet = {
+        (int16_t)flex_t_raw,
+        (int16_t)flex_i_raw,
+        (int16_t)flex_m_raw,
+        (int16_t)flex_r_raw,
+        (int16_t)flex_p_raw,
+        ax_raw,
+        ay_raw,
+        az_raw,
+        gx_raw,
+        gy_raw,
+        gz_raw
+      };
+      pCharacteristic->setValue((uint8_t*)&packet, sizeof(packet));
     #else
-      /* NORMALIZED packet format for backward compatibility */
-      float flex_t = normalizeFlex(flex_t_raw);
-      float flex_i = normalizeFlex(flex_i_raw);
-      float flex_m = normalizeFlex(flex_m_raw);
-      float flex_r = normalizeFlex(flex_r_raw);
-      float flex_p = normalizeFlex(flex_p_raw);
+      String packet;
 
-      float ax_g = ax_raw / ACCEL_SCALE;
-      float ay_g = ay_raw / ACCEL_SCALE;
-      float az_g = az_raw / ACCEL_SCALE;
-      float gx_dps = (gx_raw - gx_offset) / GYRO_SCALE;
-      float gy_dps = (gy_raw - gy_offset) / GYRO_SCALE;
-      float gz_dps = (gz_raw - gz_offset) / GYRO_SCALE;
+      #if SEND_FLEX_AS_RAW
+        packet = String(flex_t_raw) + "," +
+                 String(flex_i_raw) + "," +
+                 String(flex_m_raw) + "," +
+                 String(flex_r_raw) + "," +
+                 String(flex_p_raw) + "," +
+                 String(ax_raw) + "," +
+                 String(ay_raw) + "," +
+                 String(az_raw) + "," +
+                 String(gx_raw) + "," +
+                 String(gy_raw) + "," +
+                 String(gz_raw);
+      #else
+        float flex_t = normalizeFlex(flex_t_raw);
+        float flex_i = normalizeFlex(flex_i_raw);
+        float flex_m = normalizeFlex(flex_m_raw);
+        float flex_r = normalizeFlex(flex_r_raw);
+        float flex_p = normalizeFlex(flex_p_raw);
 
-      packet = 
-        formatFloat(flex_t, 1) + "," +
-        formatFloat(flex_i, 1) + "," +
-        formatFloat(flex_m, 1) + "," +
-        formatFloat(flex_r, 1) + "," +
-        formatFloat(flex_p, 1) + "," +
-        formatFloat(ax_g, 2) + "," +
-        formatFloat(ay_g, 2) + "," +
-        formatFloat(az_g, 2) + "," +
-        formatFloat(gx_dps, 1) + "," +
-        formatFloat(gy_dps, 1) + "," +
-        formatFloat(gz_dps, 1);
+        float ax_g = ax_raw / ACCEL_SCALE;
+        float ay_g = ay_raw / ACCEL_SCALE;
+        float az_g = az_raw / ACCEL_SCALE;
+        float gx_dps = (gx_raw - gx_offset) / GYRO_SCALE;
+        float gy_dps = (gy_raw - gy_offset) / GYRO_SCALE;
+        float gz_dps = (gz_raw - gz_offset) / GYRO_SCALE;
+
+        packet = 
+          formatFloat(flex_t, 1) + "," +
+          formatFloat(flex_i, 1) + "," +
+          formatFloat(flex_m, 1) + "," +
+          formatFloat(flex_r, 1) + "," +
+          formatFloat(flex_p, 1) + "," +
+          formatFloat(ax_g, 2) + "," +
+          formatFloat(ay_g, 2) + "," +
+          formatFloat(az_g, 2) + "," +
+          formatFloat(gx_dps, 1) + "," +
+          formatFloat(gy_dps, 1) + "," +
+          formatFloat(gz_dps, 1);
+      #endif
+
+      pCharacteristic->setValue(packet.c_str());
     #endif
-
-    /* ============================================ */
-    /* SEND VIA BLE */
-    /* ============================================ */
-    pCharacteristic->setValue(packet.c_str());
     pCharacteristic->notify();
 
     /* ============================================ */
     /* DEBUG OUTPUT */
     /* ============================================ */
-    Serial.print(DEVICE_NAME);
-    Serial.print(" | Packet #");
-    Serial.print(++packetCount);
-    Serial.print(" | Data: ");
-    Serial.println(packet);
+    packetCount++;
+    if ((packetCount % DEBUG_EVERY_N_PACKETS) == 0) {
+      Serial.print(DEVICE_NAME);
+      Serial.print(" | Packet #");
+      Serial.println(packetCount);
+    }
 
     }
   }

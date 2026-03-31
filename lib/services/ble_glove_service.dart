@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
@@ -272,6 +273,12 @@ class BleGloveService {
       // FlutterBluePlus can throw if the device is already connected.
     }
 
+    try {
+      await device.requestMtu(185);
+    } catch (_) {
+      // Some platforms or peripherals ignore MTU requests.
+    }
+
     final services = await device.discoverServices();
     for (final service in services) {
       if (service.uuid.toString().toLowerCase() != serviceUuidString.toLowerCase()) {
@@ -367,6 +374,12 @@ class BleGloveService {
   }
 
   void _handleIncomingData(String gloveName, List<int> value) {
+    final binary = _parseBinaryData(value, gloveName);
+    if (binary != null) {
+      _applyParsedData(gloveName, binary);
+      return;
+    }
+
     final chunk = String.fromCharCodes(value);
     if (gloveName == leftGloveName) {
       _leftBuffer += chunk;
@@ -388,6 +401,60 @@ class BleGloveService {
           List<double>.generate(3, (i) => double.tryParse(parts[5 + i]) ?? 0.0);
       final rawGyro =
           List<double>.generate(3, (i) => double.tryParse(parts[8 + i]) ?? 0.0);
+
+      final calibration = _calibration.getCalibration(gloveName);
+      final calibratedFlex = List<double>.generate(5, (i) {
+        if (calibration.isComplete) {
+          return calibration.mapToPercent(i, rawFlex[i]);
+        }
+        return rawFlex[i];
+      });
+
+      return {
+        'flex_thumb_raw': rawFlex[0],
+        'flex_index_raw': rawFlex[1],
+        'flex_middle_raw': rawFlex[2],
+        'flex_ring_raw': rawFlex[3],
+        'flex_pinky_raw': rawFlex[4],
+        'flex_thumb': calibratedFlex[0],
+        'flex_index': calibratedFlex[1],
+        'flex_middle': calibratedFlex[2],
+        'flex_ring': calibratedFlex[3],
+        'flex_pinky': calibratedFlex[4],
+        'ax_raw': rawAccel[0],
+        'ay_raw': rawAccel[1],
+        'az_raw': rawAccel[2],
+        'gx_raw': rawGyro[0],
+        'gy_raw': rawGyro[1],
+        'gz_raw': rawGyro[2],
+        'ax_g': calibration.accelGx(rawAccel[0]),
+        'ay_g': calibration.accelGy(rawAccel[1]),
+        'az_g': calibration.accelGz(rawAccel[2]),
+        'gx_dps': calibration.gyroDpsX(rawGyro[0]),
+        'gy_dps': calibration.gyroDpsY(rawGyro[1]),
+        'gz_dps': calibration.gyroDpsZ(rawGyro[2]),
+        'is_test_mode': 0.0,
+      };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Map<String, double>? _parseBinaryData(List<int> bytes, String gloveName) {
+    if (bytes.length != 22) {
+      return null;
+    }
+
+    try {
+      final byteData = ByteData.sublistView(Uint8List.fromList(bytes));
+      final values = List<double>.generate(
+        11,
+        (index) => byteData.getInt16(index * 2, Endian.little).toDouble(),
+      );
+
+      final rawFlex = values.sublist(0, 5);
+      final rawAccel = values.sublist(5, 8);
+      final rawGyro = values.sublist(8, 11);
 
       final calibration = _calibration.getCalibration(gloveName);
       final calibratedFlex = List<double>.generate(5, (i) {
@@ -518,16 +585,21 @@ class BleGloveService {
       return Map<String, double>.from(incoming);
     }
 
-    const flexAlpha = 0.35;
-    const imuAlpha = 0.22;
+    const flexAlpha = 0.46;
+    const imuAlpha = 0.42;
+    const flexDeadband = 0.8;
+    const imuDeadband = 0.03;
 
     final smoothed = <String, double>{};
     for (final entry in incoming.entries) {
       final key = entry.key;
       final current = entry.value;
       final prior = previous[key] ?? current;
-      final alpha = key.startsWith('flex_') ? flexAlpha : imuAlpha;
-      smoothed[key] = (alpha * current) + ((1 - alpha) * prior);
+      final isFlex = key.startsWith('flex_');
+      final deadband = isFlex ? flexDeadband : imuDeadband;
+      final alpha = isFlex ? flexAlpha : imuAlpha;
+      final filteredCurrent = (current - prior).abs() < deadband ? prior : current;
+      smoothed[key] = (alpha * filteredCurrent) + ((1 - alpha) * prior);
     }
     return smoothed;
   }

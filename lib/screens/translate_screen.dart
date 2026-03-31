@@ -20,7 +20,7 @@ class _TranslateScreenState extends State<TranslateScreen> {
   final FlutterTts _flutterTts = FlutterTts();
 
   StreamSubscription<GestureRecognitionState>? _stateSub;
-  GesturePrediction? _lastSpokenPrediction;
+  String? _lastSpokenGestureId;
   int _dotCount = 0;
   late Timer _dotTimer;
 
@@ -42,18 +42,23 @@ class _TranslateScreenState extends State<TranslateScreen> {
     await _gestureService.ensureInitialized();
     await _flutterTts.setLanguage('fil-PH');
     await _flutterTts.setPitch(1.0);
-    await _flutterTts.setSpeechRate(0.42);
+    await _flutterTts.setSpeechRate(0.5);
     await _flutterTts.setVolume(1.0);
+    await _flutterTts.awaitSpeakCompletion(false);
 
     _stateSub = _gestureService.states.listen((state) async {
       if (!mounted) {
         return;
       }
 
-      if (state.latestPrediction != null &&
-          state.latestPrediction != _lastSpokenPrediction) {
-        _lastSpokenPrediction = state.latestPrediction;
-        await _speakText(state.latestPrediction!.spokenText);
+      final prediction = state.latestPrediction;
+      if (prediction != null && prediction.gestureId != _lastSpokenGestureId) {
+        _lastSpokenGestureId = prediction.gestureId;
+        await _speakText(prediction.spokenText);
+      }
+
+      if (prediction == null && !state.isPresentationActive) {
+        _lastSpokenGestureId = null;
       }
 
       setState(() {});
@@ -99,15 +104,16 @@ class _TranslateScreenState extends State<TranslateScreen> {
                       width: double.infinity,
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color:
-                            areBothConnected ? Colors.green.shade50 : Colors.red.shade50,
+                        color: areBothConnected ? Colors.green.shade50 : Colors.red.shade50,
                         borderRadius: BorderRadius.circular(16),
                       ),
                       child: Text(
                         areBothConnected
                             ? recognitionState.model == null
                                 ? 'Gloves connected. Train at least one gesture to start translating.'
-                                : 'Gloves connected. Live windowed gesture recognition is active.'
+                                : recognitionState.isPresentationActive
+                                    ? 'Gloves connected. Active signing position detected.'
+                                    : 'Gloves connected. Hands currently look inactive.'
                             : 'Connect both gloves to start live translation.',
                         textAlign: TextAlign.center,
                         style: TextStyle(
@@ -163,6 +169,10 @@ class _TranslateScreenState extends State<TranslateScreen> {
                             Text('Status: ${recognitionState.statusMessage}'),
                             const SizedBox(height: 8),
                             Text(
+                              'Hand state: ${recognitionState.isPresentationActive ? "Presented / active" : "Down or inactive"}',
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
                               prediction == null
                                   ? 'No confident prediction yet.'
                                   : 'Recognized label: ${prediction.label} (${(prediction.confidence * 100).toStringAsFixed(0)}%)',
@@ -173,6 +183,10 @@ class _TranslateScreenState extends State<TranslateScreen> {
                                   ? 'Model: not trained'
                                   : 'Model: ${recognitionState.model!.trainerType} | Gestures: ${recognitionState.gestures.length}',
                             ),
+                            const SizedBox(height: 8),
+                            const Text(
+                              'Repeated words are suppressed until the hand changes to a different sign first.',
+                            ),
                           ],
                         ),
                       ),
@@ -182,7 +196,7 @@ class _TranslateScreenState extends State<TranslateScreen> {
                       onPressed: () async {
                         await _gestureService.clearPrediction();
                         setState(() {
-                          _lastSpokenPrediction = null;
+                          _lastSpokenGestureId = null;
                         });
                       },
                       child: const Text('Clear Latest Translation'),
