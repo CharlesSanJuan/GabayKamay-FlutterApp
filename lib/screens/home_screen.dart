@@ -97,11 +97,11 @@ class _HomeScreenState extends State<HomeScreen> {
                       bottomRight: Radius.circular(20),
                     ),
                   ),
-                  child: const Row(
+                  child: Row(
                     children: [
-                      Icon(Icons.waving_hand, color: Colors.white),
-                      SizedBox(width: 10),
-                      Column(
+                      const Icon(Icons.waving_hand, color: Colors.white),
+                      const SizedBox(width: 10),
+                      const Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
@@ -118,6 +118,14 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                         ],
                       ),
+                      const Spacer(),
+                      IconButton(
+                        onPressed: () {
+                          Navigator.of(context).pushNamed('/settings');
+                        },
+                        icon: const Icon(Icons.settings, color: Colors.white),
+                        tooltip: 'Settings',
+                      ),
                     ],
                   ),
                 ),
@@ -133,7 +141,9 @@ class _HomeScreenState extends State<HomeScreen> {
                               icon: const Icon(Icons.bluetooth),
                               label: const Text('BLE Setup'),
                               onPressed: () {
-                                Navigator.of(context).pushNamed('/ble_connection');
+                                Navigator.of(
+                                  context,
+                                ).pushNamed('/ble_connection');
                               },
                             ),
                           ),
@@ -150,12 +160,25 @@ class _HomeScreenState extends State<HomeScreen> {
                         ],
                       ),
                       const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          icon: const Icon(Icons.analytics),
+                          label: const Text('Thesis Metrics'),
+                          onPressed: () {
+                            Navigator.of(context).pushNamed('/thesis_metrics');
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 8),
                       Text(
                         bleState.areBothConnected
                             ? 'Gloves connected | Packets: L ${bleState.leftPacketCount} R ${bleState.rightPacketCount}'
                             : 'Waiting for both gloves to connect',
                         style: TextStyle(
-                          color: bleState.areBothConnected ? Colors.green : Colors.red,
+                          color: bleState.areBothConnected
+                              ? Colors.green
+                              : Colors.red,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -189,9 +212,24 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                navItem(Icons.fitness_center, 'Training', 0, !bleState.areBothConnected),
-                navItem(Icons.translate, 'Translate', 1, !bleState.areBothConnected),
-                navItem(Icons.book, 'Dictionary', 2, !bleState.areBothConnected),
+                navItem(
+                  Icons.fitness_center,
+                  'Training',
+                  0,
+                  !bleState.areBothConnected,
+                ),
+                navItem(
+                  Icons.translate,
+                  'Translate',
+                  1,
+                  !bleState.areBothConnected,
+                ),
+                navItem(
+                  Icons.book,
+                  'Dictionary',
+                  2,
+                  !bleState.areBothConnected,
+                ),
                 navItem(Icons.tune, 'Calibrate', 3, !bleState.areBothConnected),
               ],
             ),
@@ -255,8 +293,9 @@ class _HomeScreenState extends State<HomeScreen> {
               label,
               style: TextStyle(
                 fontSize: 11,
-                fontWeight:
-                    active && !isDisabled ? FontWeight.bold : FontWeight.normal,
+                fontWeight: active && !isDisabled
+                    ? FontWeight.bold
+                    : FontWeight.normal,
                 color: active && !isDisabled ? primaryOrange : Colors.black,
               ),
             ),

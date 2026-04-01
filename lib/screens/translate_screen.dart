@@ -1,11 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_tts/flutter_tts.dart';
 
 import '../models/gesture_models.dart';
+import '../services/app_settings_service.dart';
 import '../services/ble_glove_service.dart';
 import '../services/gesture_recognition_service.dart';
+import '../services/speech_service.dart';
 
 class TranslateScreen extends StatefulWidget {
   const TranslateScreen({super.key});
@@ -17,9 +18,11 @@ class TranslateScreen extends StatefulWidget {
 class _TranslateScreenState extends State<TranslateScreen> {
   final BleGloveService _bleService = BleGloveService();
   final GestureRecognitionService _gestureService = GestureRecognitionService();
-  final FlutterTts _flutterTts = FlutterTts();
+  final SpeechService _speechService = SpeechService();
+  final AppSettingsService _settingsService = AppSettingsService();
 
   StreamSubscription<GestureRecognitionState>? _stateSub;
+  StreamSubscription<AppSettings>? _settingsSub;
   String? _lastSpokenGestureId;
   int _dotCount = 0;
   late Timer _dotTimer;
@@ -40,11 +43,8 @@ class _TranslateScreenState extends State<TranslateScreen> {
 
   Future<void> _initialize() async {
     await _gestureService.ensureInitialized();
-    await _flutterTts.setLanguage('fil-PH');
-    await _flutterTts.setPitch(1.0);
-    await _flutterTts.setSpeechRate(0.5);
-    await _flutterTts.setVolume(1.0);
-    await _flutterTts.awaitSpeakCompletion(false);
+    await _settingsService.ensureInitialized();
+    await _speechService.ensureInitialized();
 
     _stateSub = _gestureService.states.listen((state) async {
       if (!mounted) {
@@ -52,7 +52,10 @@ class _TranslateScreenState extends State<TranslateScreen> {
       }
 
       final prediction = state.latestPrediction;
-      if (prediction != null && prediction.gestureId != _lastSpokenGestureId) {
+      final settings = _settingsService.settings;
+      if (prediction != null &&
+          settings.ttsEnabled &&
+          prediction.gestureId != _lastSpokenGestureId) {
         _lastSpokenGestureId = prediction.gestureId;
         await _speakText(prediction.spokenText);
       }
@@ -63,24 +66,30 @@ class _TranslateScreenState extends State<TranslateScreen> {
 
       setState(() {});
     });
+
+    _settingsSub = _settingsService.changes.listen((_) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
   }
 
   Future<void> _speakText(String text) async {
-    await _flutterTts.stop();
-    await _flutterTts.speak(text);
+    await _speechService.speak(text);
   }
 
   @override
   void dispose() {
     _stateSub?.cancel();
+    _settingsSub?.cancel();
     _dotTimer.cancel();
-    _flutterTts.stop();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final recognitionState = _gestureService.state;
+    final settings = _settingsService.settings;
     final prediction = recognitionState.latestPrediction;
     final areBothConnected = _bleService.snapshot.areBothConnected;
 
@@ -151,7 +160,7 @@ class _TranslateScreenState extends State<TranslateScreen> {
                         IconButton(
                           icon: const Icon(Icons.volume_up),
                           iconSize: 30,
-                          onPressed: prediction == null
+                          onPressed: prediction == null || !settings.ttsEnabled
                               ? null
                               : () async {
                                   await _speakText(prediction.spokenText);
@@ -186,6 +195,12 @@ class _TranslateScreenState extends State<TranslateScreen> {
                             const SizedBox(height: 8),
                             const Text(
                               'Repeated words are suppressed until the hand changes to a different sign first.',
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              settings.ttsEnabled
+                                  ? 'Speech queue is enabled, so active words finish speaking instead of being cut off.'
+                                  : 'Speech is disabled in Settings.',
                             ),
                           ],
                         ),

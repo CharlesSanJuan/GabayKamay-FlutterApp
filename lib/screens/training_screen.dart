@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../models/gesture_models.dart';
+import '../services/app_settings_service.dart';
 import '../services/ble_glove_service.dart';
 import '../services/gesture_recognition_service.dart';
 
@@ -18,16 +19,32 @@ class _TrainingScreenState extends State<TrainingScreen> {
   final TextEditingController _spokenTextController = TextEditingController();
   final BleGloveService _bleService = BleGloveService();
   final GestureRecognitionService _gestureService = GestureRecognitionService();
+  final AppSettingsService _settingsService = AppSettingsService();
 
   StreamSubscription<GestureRecognitionState>? _stateSub;
+  StreamSubscription<AppSettings>? _settingsSub;
   int _targetSamples = 10;
   bool _isDynamicGesture = false;
+  String? _autoCaptureDraftId;
+  int? _autoCaptureCapturedCount;
 
   @override
   void initState() {
     super.initState();
     _gestureService.ensureInitialized();
-    _stateSub = _gestureService.states.listen((_) {
+    _settingsService.ensureInitialized().then((_) {
+      if (mounted) {
+        setState(() {});
+        _scheduleAutoCaptureIfNeeded(_gestureService.state);
+      }
+    });
+    _stateSub = _gestureService.states.listen((state) {
+      if (mounted) {
+        setState(() {});
+      }
+      _scheduleAutoCaptureIfNeeded(state);
+    });
+    _settingsSub = _settingsService.changes.listen((_) {
       if (mounted) {
         setState(() {});
       }
@@ -37,9 +54,53 @@ class _TrainingScreenState extends State<TrainingScreen> {
   @override
   void dispose() {
     _stateSub?.cancel();
+    _settingsSub?.cancel();
     _labelController.dispose();
     _spokenTextController.dispose();
     super.dispose();
+  }
+
+  void _scheduleAutoCaptureIfNeeded(GestureRecognitionState state) {
+    final settings = _settingsService.settings;
+    final draft = state.activeDraft;
+    if (!settings.trainingAutoCaptureEnabled ||
+        draft == null ||
+        state.isRecording ||
+        draft.isComplete) {
+      if (draft == null || draft.isComplete || !settings.trainingAutoCaptureEnabled) {
+        _autoCaptureDraftId = null;
+        _autoCaptureCapturedCount = null;
+      }
+      return;
+    }
+
+    if (_autoCaptureDraftId == draft.gestureId &&
+        _autoCaptureCapturedCount == draft.capturedCount) {
+      return;
+    }
+
+    _autoCaptureDraftId = draft.gestureId;
+    _autoCaptureCapturedCount = draft.capturedCount;
+
+    Future<void>.delayed(const Duration(milliseconds: 450), () async {
+      if (!mounted) {
+        return;
+      }
+
+      final latestState = _gestureService.state;
+      final latestDraft = latestState.activeDraft;
+      final latestSettings = _settingsService.settings;
+      if (!latestSettings.trainingAutoCaptureEnabled ||
+          latestDraft == null ||
+          latestDraft.gestureId != draft.gestureId ||
+          latestDraft.capturedCount != draft.capturedCount ||
+          latestDraft.isComplete ||
+          latestState.isRecording) {
+        return;
+      }
+
+      await _gestureService.captureTrainingSample(countdown: Duration.zero);
+    });
   }
 
   Future<void> _startDraft() async {
@@ -69,6 +130,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
   @override
   Widget build(BuildContext context) {
     final recognitionState = _gestureService.state;
+    final settings = _settingsService.settings;
     final draft = recognitionState.activeDraft;
     final areBothConnected = _bleService.snapshot.areBothConnected;
     final draftProgress = draft == null || draft.targetSamples == 0
@@ -144,6 +206,22 @@ class _TrainingScreenState extends State<TrainingScreen> {
                   : null,
             ),
             const SizedBox(height: 8),
+            SwitchListTile.adaptive(
+              value: settings.trainingAutoCaptureEnabled,
+              title: const Text('Auto-Capture Repetitions'),
+              subtitle: Text(
+                settings.trainingAutoCaptureEnabled
+                    ? 'After each window, the next capture starts automatically.'
+                    : 'Use the Capture button manually for each repetition.',
+              ),
+              onChanged: (value) async {
+                await _settingsService.save(
+                  settings.copyWith(trainingAutoCaptureEnabled: value),
+                );
+                _scheduleAutoCaptureIfNeeded(_gestureService.state);
+              },
+            ),
+            const SizedBox(height: 8),
             Row(
               children: [
                 const Text('Training windows:'),
@@ -168,6 +246,10 @@ class _TrainingScreenState extends State<TrainingScreen> {
                       : null,
                 ),
               ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Countdown: ${settings.trainingCountdownSeconds}s | Translation muted during training: ${settings.muteTranslationWhileTraining ? "On" : "Off"}',
             ),
             const SizedBox(height: 20),
             Card(
@@ -222,7 +304,9 @@ class _TrainingScreenState extends State<TrainingScreen> {
                           ? '${(recognitionState.captureProgress * 100).toStringAsFixed(0)}% of the current window captured'
                           : draft == null
                               ? 'Create a draft to begin.'
-                              : 'Tap capture when you are ready for the next repetition.',
+                              : settings.trainingAutoCaptureEnabled
+                                  ? 'Auto-capture is on. The next repetition will begin automatically.'
+                                  : 'Tap capture when you are ready for the next repetition.',
                     ),
                   ],
                 ),
@@ -237,7 +321,9 @@ class _TrainingScreenState extends State<TrainingScreen> {
             ElevatedButton(
               onPressed: draft != null && !recognitionState.isRecording
                   ? () async {
-                      await _gestureService.captureTrainingSample();
+                      await _gestureService.captureTrainingSample(
+                        countdown: Duration.zero,
+                      );
                     }
                   : null,
               child: Text(

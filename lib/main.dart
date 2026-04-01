@@ -7,6 +7,8 @@ import 'screens/training_screen.dart';
 import 'screens/dictionary_screen.dart';
 import 'screens/ble_connection_screen.dart';
 import 'screens/ble_debug_screen.dart';
+import 'screens/settings_screen.dart';
+import 'screens/thesis_metrics_screen.dart';
 
 void main() {
   runApp(const MyApp());
@@ -20,10 +22,7 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'GabayKamay',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        fontFamily: 'Roboto',
-      ),
+      theme: ThemeData(useMaterial3: true, fontFamily: 'Roboto'),
       initialRoute: '/',
       routes: {
         '/': (context) => const SplashScreen(),
@@ -33,6 +32,8 @@ class MyApp extends StatelessWidget {
         '/dictionary': (context) => const DictionaryScreen(),
         '/ble_connection': (context) => const BleConnectionScreen(),
         '/ble_debug': (context) => const BleDebugScreen(),
+        '/settings': (context) => const SettingsScreen(),
+        '/thesis_metrics': (context) => const ThesisMetricsScreen(),
       },
     );
   }

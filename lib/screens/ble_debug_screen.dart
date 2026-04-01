@@ -53,16 +53,18 @@ class _BleDebugScreenState extends State<BleDebugScreen> {
     setState(() {
       _debugLogs.add(message);
 
-      if (state.leftPacketCount != _lastLoggedLeftPackets && state.leftData != null) {
+      if (state.leftPacketCount != _lastLoggedLeftPackets &&
+          state.leftData != null) {
         _debugLogs.add(
-          '[$timestamp] LEFT data thumb=${state.leftData!['flex_thumb']?.toStringAsFixed(1)} ax=${state.leftData!['ax_g']?.toStringAsFixed(2)}',
+          '[$timestamp] LEFT data thumb=${state.leftData!['flex_thumb']?.toStringAsFixed(1)} pitch=${state.leftData!['pitch_deg']?.toStringAsFixed(1)} roll=${state.leftData!['roll_deg']?.toStringAsFixed(1)}',
         );
         _lastLoggedLeftPackets = state.leftPacketCount;
       }
 
-      if (state.rightPacketCount != _lastLoggedRightPackets && state.rightData != null) {
+      if (state.rightPacketCount != _lastLoggedRightPackets &&
+          state.rightData != null) {
         _debugLogs.add(
-          '[$timestamp] RIGHT data thumb=${state.rightData!['flex_thumb']?.toStringAsFixed(1)} ax=${state.rightData!['ax_g']?.toStringAsFixed(2)}',
+          '[$timestamp] RIGHT data thumb=${state.rightData!['flex_thumb']?.toStringAsFixed(1)} pitch=${state.rightData!['pitch_deg']?.toStringAsFixed(1)} roll=${state.rightData!['roll_deg']?.toStringAsFixed(1)}',
         );
         _lastLoggedRightPackets = state.rightPacketCount;
       }
@@ -77,7 +79,9 @@ class _BleDebugScreenState extends State<BleDebugScreen> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_logScrollController.hasClients) {
-        _logScrollController.jumpTo(_logScrollController.position.maxScrollExtent);
+        _logScrollController.jumpTo(
+          _logScrollController.position.maxScrollExtent,
+        );
       }
     });
   }
@@ -101,7 +105,10 @@ class _BleDebugScreenState extends State<BleDebugScreen> {
               children: [
                 Text(
                   title,
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 const SizedBox(width: 8),
                 Icon(
@@ -124,7 +131,9 @@ class _BleDebugScreenState extends State<BleDebugScreen> {
               Text('Flex Sensors (0-100%):'),
               Text('Thumb: ${data['flex_thumb']?.toStringAsFixed(1) ?? 'N/A'}'),
               Text('Index: ${data['flex_index']?.toStringAsFixed(1) ?? 'N/A'}'),
-              Text('Middle: ${data['flex_middle']?.toStringAsFixed(1) ?? 'N/A'}'),
+              Text(
+                'Middle: ${data['flex_middle']?.toStringAsFixed(1) ?? 'N/A'}',
+              ),
               Text('Ring: ${data['flex_ring']?.toStringAsFixed(1) ?? 'N/A'}'),
               Text('Pinky: ${data['flex_pinky']?.toStringAsFixed(1) ?? 'N/A'}'),
               const SizedBox(height: 8),
@@ -137,6 +146,11 @@ class _BleDebugScreenState extends State<BleDebugScreen> {
               Text('X: ${data['gx_dps']?.toStringAsFixed(1) ?? 'N/A'}'),
               Text('Y: ${data['gy_dps']?.toStringAsFixed(1) ?? 'N/A'}'),
               Text('Z: ${data['gz_dps']?.toStringAsFixed(1) ?? 'N/A'}'),
+              const SizedBox(height: 8),
+              Text('Orientation (deg):'),
+              Text('Pitch: ${data['pitch_deg']?.toStringAsFixed(1) ?? 'N/A'}'),
+              Text('Roll: ${data['roll_deg']?.toStringAsFixed(1) ?? 'N/A'}'),
+              Text('Tilt: ${data['tilt_deg']?.toStringAsFixed(1) ?? 'N/A'}'),
             ] else
               const Text('No data received yet'),
           ],
@@ -177,8 +191,12 @@ class _BleDebugScreenState extends State<BleDebugScreen> {
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Icon(
-                          state.areBothConnected ? Icons.check_circle : Icons.warning,
-                          color: state.areBothConnected ? Colors.green : Colors.orange,
+                          state.areBothConnected
+                              ? Icons.check_circle
+                              : Icons.warning,
+                          color: state.areBothConnected
+                              ? Colors.green
+                              : Colors.orange,
                         ),
                         const SizedBox(width: 8),
                         Text(
@@ -238,7 +256,10 @@ class _BleDebugScreenState extends State<BleDebugScreen> {
                 child: Column(
                   children: [
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
                       color: Colors.grey.shade800,
                       child: Row(
                         children: [

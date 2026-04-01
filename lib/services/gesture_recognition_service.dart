@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import '../models/gesture_models.dart';
+import 'app_settings_service.dart';
 import 'ble_glove_service.dart';
 import 'gesture_feature_extractor.dart';
 import 'gesture_storage_service.dart';
@@ -12,6 +13,7 @@ abstract class GestureTrainer {
   GesturePrediction? predict(
     GestureModelSnapshot model,
     List<double> featureVector,
+    double decisionThreshold,
   );
 }
 
@@ -91,6 +93,7 @@ class RandomForestGestureTrainer implements GestureTrainer {
   GesturePrediction? predict(
     GestureModelSnapshot model,
     List<double> featureVector,
+    double decisionThreshold,
   ) {
     if (!model.hasProfiles || featureVector.length != model.featureLength) {
       return null;
@@ -120,7 +123,7 @@ class RandomForestGestureTrainer implements GestureTrainer {
     final best = ranked.first;
     final second = ranked.length > 1 ? ranked[1].value : 0.0;
     final confidence = (best.value * 0.82) + ((best.value - second).clamp(0.0, 1.0) * 0.18);
-    if (confidence < model.decisionThreshold) {
+    if (confidence < decisionThreshold) {
       return null;
     }
 
@@ -305,6 +308,7 @@ class GestureRecognitionService {
   final GestureStorageService _storageService = GestureStorageService();
   final GestureTrainer _trainer = RandomForestGestureTrainer();
   final GloveCalibrationService _calibrationService = GloveCalibrationService();
+  final AppSettingsService _settingsService = AppSettingsService();
   final StreamController<GestureRecognitionState> _stateController =
       StreamController<GestureRecognitionState>.broadcast();
 
@@ -327,6 +331,7 @@ class GestureRecognitionService {
     }
 
     _initialized = true;
+    await _settingsService.ensureInitialized();
     final repository = await _storageService.loadRepository();
     final compatibleSamples = _compatibleSamples(repository.samples);
     final retrainedModel =
@@ -411,7 +416,11 @@ class GestureRecognitionService {
     );
     _emit();
 
-    await _runCountdown(countdown, prefix: 'Prepare gesture window');
+    final settings = _settingsService.settings;
+    final effectiveCountdown = countdown.inSeconds > 0
+        ? countdown
+        : Duration(seconds: settings.trainingCountdownSeconds);
+    await _runCountdown(effectiveCountdown, prefix: 'Prepare gesture window');
 
     try {
       final effectiveWindow =
@@ -653,6 +662,20 @@ class GestureRecognitionService {
 
   void _handleBleSnapshot(BleGloveSnapshot snapshot) {
     final model = _state.model;
+    final settings = _settingsService.settings;
+
+    if (_state.activeDraft != null && settings.muteTranslationWhileTraining) {
+      _inferenceFrames.clear();
+      if (_state.latestPrediction != null || _state.isPresentationActive) {
+        _state = _state.copyWith(
+          clearPrediction: true,
+          isPresentationActive: false,
+        );
+        _emit();
+      }
+      return;
+    }
+
     if (model == null || !snapshot.areBothConnected) {
       _inferenceFrames.clear();
       if (_state.latestPrediction != null || _state.isPresentationActive) {
@@ -691,8 +714,13 @@ class GestureRecognitionService {
       List<List<double>>.from(_inferenceFrames),
       minimumFrames: 12,
     );
-    final presentationActive =
-        _featureExtractor.isPresentationActive(List<List<double>>.from(_inferenceFrames));
+    final presentationActive = _featureExtractor.isPresentationActive(
+      List<List<double>>.from(_inferenceFrames),
+      gyroThreshold: settings.presentationGyroThreshold,
+      flexThreshold: settings.presentationFlexThreshold,
+      accelerationThreshold: settings.presentationAccelerationThreshold,
+      poseThreshold: settings.presentationPoseThreshold,
+    );
     if (!presentationActive) {
       _lastPredictionAt = now;
       _lastCandidateGestureId = null;
@@ -708,7 +736,11 @@ class GestureRecognitionService {
     }
 
     final featureVector = _featureExtractor.aggregateWindow(activeWindow);
-    final prediction = _trainer.predict(model, featureVector);
+    final prediction = _trainer.predict(
+      model,
+      featureVector,
+      settings.confidenceThreshold,
+    );
     if (prediction == null) {
       _lastPredictionAt = now;
       _lastCandidateGestureId = null;
@@ -718,6 +750,39 @@ class GestureRecognitionService {
         isPresentationActive: true,
         clearPrediction: true,
         statusMessage: 'Watching for a confident sign...',
+      );
+      _emit();
+      return;
+    }
+
+    final predictedProfile = _profileForGesture(model, prediction.gestureId);
+    final isDynamicGesture = predictedProfile?.isDynamic ?? false;
+    final hasDynamicMotion = _featureExtractor.hasDynamicMotion(
+      activeWindow,
+      threshold: settings.dynamicMotionThreshold,
+    );
+    if (isDynamicGesture && !hasDynamicMotion) {
+      _lastPredictionAt = now;
+      _lastCandidateGestureId = null;
+      _candidateCount = 0;
+      _state = _state.copyWith(
+        isPresentationActive: true,
+        clearPrediction: true,
+        statusMessage: 'Matching handshape found, but the movement was too weak.',
+      );
+      _emit();
+      return;
+    }
+    if (!isDynamicGesture &&
+        hasDynamicMotion &&
+        prediction.confidence < (settings.confidenceThreshold + 0.12)) {
+      _lastPredictionAt = now;
+      _lastCandidateGestureId = null;
+      _candidateCount = 0;
+      _state = _state.copyWith(
+        isPresentationActive: true,
+        clearPrediction: true,
+        statusMessage: 'Movement detected. Waiting for a confident motion gesture.',
       );
       _emit();
       return;
@@ -780,6 +845,18 @@ class GestureRecognitionService {
               sample.featureVector.length == _featureExtractor.aggregatedFeatureCount,
         )
         .toList();
+  }
+
+  GestureModelProfile? _profileForGesture(
+    GestureModelSnapshot model,
+    String gestureId,
+  ) {
+    for (final profile in model.profiles) {
+      if (profile.gestureId == gestureId) {
+        return profile;
+      }
+    }
+    return null;
   }
 
   void _emit() {

@@ -13,7 +13,16 @@ class GestureFeatureExtractor {
     'gx_dps',
     'gy_dps',
     'gz_dps',
+    'pitch_deg',
+    'roll_deg',
+    'tilt_deg',
   ];
+
+  static const int _gloveStride = 14;
+  static const int _flexCount = 5;
+  static const int _accelStart = 5;
+  static const int _gyroStart = 8;
+  static const int _orientationStart = 11;
 
   int get rawFeatureCount => _orderedKeys.length * 2;
   int get aggregatedFeatureCount => rawFeatureCount * 12;
@@ -36,7 +45,10 @@ class GestureFeatureExtractor {
     final featureLength = frames.first.length;
     final means = List<double>.filled(featureLength, 0);
     final minimums = List<double>.filled(featureLength, double.infinity);
-    final maximums = List<double>.filled(featureLength, double.negativeInfinity);
+    final maximums = List<double>.filled(
+      featureLength,
+      double.negativeInfinity,
+    );
     final sumsOfSquares = List<double>.filled(featureLength, 0);
     final meanAbsoluteDeltas = List<double>.filled(featureLength, 0);
     final starts = List<double>.from(frames.first);
@@ -77,8 +89,11 @@ class GestureFeatureExtractor {
     final count = frames.length.toDouble();
     final earlyCount = third.clamp(1, frames.length).toDouble();
     final middleCount =
-        (frames.length > third ? (frames.length - third).clamp(1, third) : 1).toDouble();
-    final lateCount = (frames.length - (third * 2)).clamp(1, frames.length).toDouble();
+        (frames.length > third ? (frames.length - third).clamp(1, third) : 1)
+            .toDouble();
+    final lateCount = (frames.length - (third * 2))
+        .clamp(1, frames.length)
+        .toDouble();
     final deltas = List<double>.filled(featureLength, 0);
     final ranges = List<double>.filled(featureLength, 0);
     final standardDeviations = List<double>.filled(featureLength, 0);
@@ -198,31 +213,96 @@ class GestureFeatureExtractor {
     double accelerationActivity = 0.0;
     double poseEnergy = 0.0;
 
-    for (var gloveOffset = 0; gloveOffset < rawFeatureCount; gloveOffset += 11) {
-      poseEnergy += aggregated[meansOffset + gloveOffset].abs();
-      poseEnergy += aggregated[meansOffset + gloveOffset + 1].abs();
-      poseEnergy += aggregated[meansOffset + gloveOffset + 2].abs();
-      poseEnergy += aggregated[meansOffset + gloveOffset + 3].abs();
-      poseEnergy += aggregated[meansOffset + gloveOffset + 4].abs();
+    for (
+      var gloveOffset = 0;
+      gloveOffset < rawFeatureCount;
+      gloveOffset += _gloveStride
+    ) {
+      for (var i = 0; i < _flexCount; i++) {
+        poseEnergy += aggregated[meansOffset + gloveOffset + i].abs();
+        flexActivity += aggregated[rangesOffset + gloveOffset + i];
+      }
 
-      flexActivity += aggregated[rangesOffset + gloveOffset];
-      flexActivity += aggregated[rangesOffset + gloveOffset + 1];
-      flexActivity += aggregated[rangesOffset + gloveOffset + 2];
-      flexActivity += aggregated[rangesOffset + gloveOffset + 3];
-      flexActivity += aggregated[rangesOffset + gloveOffset + 4];
-
-      accelerationActivity += aggregated[stdOffset + gloveOffset + 5].abs();
-      accelerationActivity += aggregated[stdOffset + gloveOffset + 6].abs();
-      accelerationActivity += aggregated[stdOffset + gloveOffset + 7].abs();
-
-      gyroActivity += aggregated[absDeltaOffset + gloveOffset + 8].abs();
-      gyroActivity += aggregated[absDeltaOffset + gloveOffset + 9].abs();
-      gyroActivity += aggregated[absDeltaOffset + gloveOffset + 10].abs();
+      for (var i = 0; i < 3; i++) {
+        accelerationActivity +=
+            aggregated[stdOffset + gloveOffset + _accelStart + i].abs();
+        gyroActivity +=
+            aggregated[absDeltaOffset + gloveOffset + _gyroStart + i].abs();
+        poseEnergy +=
+            aggregated[meansOffset + gloveOffset + _orientationStart + i]
+                .abs() *
+            0.12;
+      }
     }
 
     return gyroActivity >= gyroThreshold ||
         flexActivity >= flexThreshold ||
         accelerationActivity >= accelerationThreshold ||
         poseEnergy >= poseThreshold;
+  }
+
+  double estimateDynamicMotionScore(List<List<double>> frames) {
+    if (frames.length < 6) {
+      return 0.0;
+    }
+
+    final aggregated = aggregateWindow(frames);
+    if (aggregated.length != aggregatedFeatureCount) {
+      return 0.0;
+    }
+
+    final rangesOffset = rawFeatureCount * 3;
+    final deltasOffset = rawFeatureCount * 6;
+    final stdOffset = rawFeatureCount * 7;
+    final absDeltaOffset = rawFeatureCount * 8;
+
+    var score = 0.0;
+    for (
+      var gloveOffset = 0;
+      gloveOffset < rawFeatureCount;
+      gloveOffset += _gloveStride
+    ) {
+      final accelRange =
+          aggregated[rangesOffset + gloveOffset + _accelStart].abs() +
+          aggregated[rangesOffset + gloveOffset + _accelStart + 1].abs() +
+          aggregated[rangesOffset + gloveOffset + _accelStart + 2].abs();
+      final gyroRange =
+          aggregated[rangesOffset + gloveOffset + _gyroStart].abs() +
+          aggregated[rangesOffset + gloveOffset + _gyroStart + 1].abs() +
+          aggregated[rangesOffset + gloveOffset + _gyroStart + 2].abs();
+      final accelDelta =
+          aggregated[deltasOffset + gloveOffset + _accelStart].abs() +
+          aggregated[deltasOffset + gloveOffset + _accelStart + 1].abs() +
+          aggregated[deltasOffset + gloveOffset + _accelStart + 2].abs();
+      final gyroDelta =
+          aggregated[deltasOffset + gloveOffset + _gyroStart].abs() +
+          aggregated[deltasOffset + gloveOffset + _gyroStart + 1].abs() +
+          aggregated[deltasOffset + gloveOffset + _gyroStart + 2].abs();
+      final accelStd =
+          aggregated[stdOffset + gloveOffset + _accelStart].abs() +
+          aggregated[stdOffset + gloveOffset + _accelStart + 1].abs() +
+          aggregated[stdOffset + gloveOffset + _accelStart + 2].abs();
+      final gyroCadence =
+          aggregated[absDeltaOffset + gloveOffset + _gyroStart].abs() +
+          aggregated[absDeltaOffset + gloveOffset + _gyroStart + 1].abs() +
+          aggregated[absDeltaOffset + gloveOffset + _gyroStart + 2].abs();
+
+      score +=
+          (accelRange * 1.6) +
+          (gyroRange * 0.05) +
+          (accelDelta * 0.8) +
+          (gyroDelta * 0.02) +
+          (accelStd * 2.2) +
+          (gyroCadence * 3.4);
+    }
+
+    return score;
+  }
+
+  bool hasDynamicMotion(
+    List<List<double>> frames, {
+    required double threshold,
+  }) {
+    return estimateDynamicMotionScore(frames) >= threshold;
   }
 }

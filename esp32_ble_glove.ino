@@ -71,19 +71,22 @@ int16_t gy_offset = 0;
 int16_t gz_offset = 0;
 
 unsigned long lastSend = 0;
+unsigned long nextSendAt = 0;
 unsigned long packetCount = 0;
 
 /* ============================================ */
 /* TRANSMISSION TIMING OFFSET */
 /* ============================================ */
 /* 
- * To prevent BLE collisions between two ESP32s:
- * - LEFT glove: offset = 0ms (sends immediately)
- * - RIGHT glove: offset = 25ms (sends 25ms later)
- * 
- * This staggers transmissions to avoid interference.
+ * To prevent BLE collisions between two ESP32s without reducing
+ * the packet rate:
+ * - LEFT glove: phase = 0ms
+ * - RIGHT glove: phase = 10ms
+ *
+ * Both gloves still use the same SEND_INTERVAL_MS. Only their
+ * starting phase differs.
  */
-#define TRANSMISSION_OFFSET 0  // Change to 10 for RIGHT glove
+#define TRANSMISSION_PHASE_MS 0  // Change to 10 for RIGHT glove
 #define SEND_INTERVAL_MS 25
 #define DEBUG_EVERY_N_PACKETS 10
 #define SEND_BINARY_PACKET 1
@@ -279,13 +282,14 @@ void loop() {
   }
   /* Connecting */
   if (deviceConnected && !oldDeviceConnected) {
+    nextSendAt = millis() + TRANSMISSION_PHASE_MS;
     oldDeviceConnected = deviceConnected;
   }
 
-  /* Send at ~20Hz (50ms interval) with offset - SLOWER FOR STABILITY */
-  if (deviceConnected && millis() - lastSend >= (SEND_INTERVAL_MS + TRANSMISSION_OFFSET)) {
+  if (deviceConnected && ((long)(millis() - nextSendAt) >= 0)) {
 
     lastSend = millis();
+    nextSendAt += SEND_INTERVAL_MS;
 
     if (testModeEnabled) {
     /* ============================================ */
