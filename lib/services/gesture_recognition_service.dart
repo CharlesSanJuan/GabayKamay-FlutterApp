@@ -47,37 +47,37 @@ class RandomForestGestureTrainer implements GestureTrainer {
     final featureLength = samples.first.featureVector.length;
     final labels = <String>{
       for (final sample in samples) sample.gestureId,
-    }.toList()
-      ..sort();
+    }.toList()..sort();
     final maxFeatures = max(1, sqrt(featureLength).round());
     final profiles = <GestureModelProfile>[
       for (final gestureId in labels)
         GestureModelProfile(
           gestureId: gestureId,
-          label: samples.firstWhere((sample) => sample.gestureId == gestureId).label,
-          spokenText:
-              samples.firstWhere((sample) => sample.gestureId == gestureId).spokenText,
-          isDynamic:
-              samples.firstWhere((sample) => sample.gestureId == gestureId).isDynamic,
+          label: samples
+              .firstWhere((sample) => sample.gestureId == gestureId)
+              .label,
+          spokenText: samples
+              .firstWhere((sample) => sample.gestureId == gestureId)
+              .spokenText,
+          isDynamic: samples
+              .firstWhere((sample) => sample.gestureId == gestureId)
+              .isDynamic,
         ),
     ];
 
-    final trees = List<RandomForestTreeSnapshot>.generate(
-      treeCount,
-      (_) {
-        final bootstrapped = List<GestureTrainingSample>.generate(
-          samples.length,
-          (_) => samples[_random.nextInt(samples.length)],
-        );
-        final root = _buildNode(
-          bootstrapped,
-          depth: 0,
-          maxFeatures: maxFeatures,
-          labels: labels,
-        );
-        return RandomForestTreeSnapshot(root: root);
-      },
-    );
+    final trees = List<RandomForestTreeSnapshot>.generate(treeCount, (_) {
+      final bootstrapped = List<GestureTrainingSample>.generate(
+        samples.length,
+        (_) => samples[_random.nextInt(samples.length)],
+      );
+      final root = _buildNode(
+        bootstrapped,
+        depth: 0,
+        maxFeatures: maxFeatures,
+        labels: labels,
+      );
+      return RandomForestTreeSnapshot(root: root);
+    });
 
     return GestureModelSnapshot(
       trainerType: 'random_forest',
@@ -103,7 +103,8 @@ class RandomForestGestureTrainer implements GestureTrainer {
     for (final tree in model.trees) {
       final treeVote = _traverseTree(tree.root, featureVector);
       for (final entry in treeVote.entries) {
-        probabilities[entry.key] = (probabilities[entry.key] ?? 0) + entry.value;
+        probabilities[entry.key] =
+            (probabilities[entry.key] ?? 0) + entry.value;
       }
     }
 
@@ -122,7 +123,8 @@ class RandomForestGestureTrainer implements GestureTrainer {
 
     final best = ranked.first;
     final second = ranked.length > 1 ? ranked[1].value : 0.0;
-    final confidence = (best.value * 0.82) + ((best.value - second).clamp(0.0, 1.0) * 0.18);
+    final confidence =
+        (best.value * 0.82) + ((best.value - second).clamp(0.0, 1.0) * 0.18);
     if (confidence < decisionThreshold) {
       return null;
     }
@@ -154,7 +156,9 @@ class RandomForestGestureTrainer implements GestureTrainer {
     required List<String> labels,
   }) {
     final labelCounts = _countLabels(samples);
-    if (depth >= maxDepth || samples.length < minSamplesSplit || labelCounts.length == 1) {
+    if (depth >= maxDepth ||
+        samples.length < minSamplesSplit ||
+        labelCounts.length == 1) {
       return RandomForestNodeSnapshot(
         isLeaf: true,
         featureIndex: -1,
@@ -202,9 +206,12 @@ class RandomForestGestureTrainer implements GestureTrainer {
           continue;
         }
 
-        final gain = parentImpurity -
-            ((left.length / samples.length) * _gini(_countLabels(left), left.length)) -
-            ((right.length / samples.length) * _gini(_countLabels(right), right.length));
+        final gain =
+            parentImpurity -
+            ((left.length / samples.length) *
+                _gini(_countLabels(left), left.length)) -
+            ((right.length / samples.length) *
+                _gini(_countLabels(right), right.length));
 
         if (bestGain == null || gain > bestGain) {
           bestGain = gain;
@@ -254,7 +261,10 @@ class RandomForestGestureTrainer implements GestureTrainer {
     RandomForestNodeSnapshot node,
     List<double> featureVector,
   ) {
-    if (node.isLeaf || node.left == null || node.right == null || node.featureIndex < 0) {
+    if (node.isLeaf ||
+        node.left == null ||
+        node.right == null ||
+        node.featureIndex < 0) {
       return node.probabilities;
     }
 
@@ -320,6 +330,7 @@ class GestureRecognitionService {
   String? _lastCommittedGestureId;
   String? _lastCandidateGestureId;
   int _candidateCount = 0;
+  int _captureOperationId = 0;
 
   Stream<GestureRecognitionState> get states => _stateController.stream;
   GestureRecognitionState get state => _state;
@@ -334,8 +345,9 @@ class GestureRecognitionService {
     await _settingsService.ensureInitialized();
     final repository = await _storageService.loadRepository();
     final compatibleSamples = _compatibleSamples(repository.samples);
-    final retrainedModel =
-        compatibleSamples.isEmpty ? null : _trainer.train(compatibleSamples);
+    final retrainedModel = compatibleSamples.isEmpty
+        ? null
+        : _trainer.train(compatibleSamples);
 
     _state = _state.copyWith(
       isReady: true,
@@ -368,13 +380,16 @@ class GestureRecognitionService {
   }) async {
     await ensureInitialized();
     if (!_isCalibrationReady()) {
-      _setStatus('Calibration must be completed for both gloves before training.');
+      _setStatus(
+        'Calibration must be completed for both gloves before training.',
+      );
       return;
     }
 
     final trimmedLabel = label.trim();
-    final trimmedSpokenText =
-        spokenText.trim().isEmpty ? trimmedLabel : spokenText.trim();
+    final trimmedSpokenText = spokenText.trim().isEmpty
+        ? trimmedLabel
+        : spokenText.trim();
     final gestureId =
         '${trimmedLabel.toLowerCase().replaceAll(' ', '_')}_${DateTime.now().millisecondsSinceEpoch}';
 
@@ -408,6 +423,7 @@ class GestureRecognitionService {
       return;
     }
 
+    final operationId = ++_captureOperationId;
     _state = _state.copyWith(
       isRecording: true,
       captureProgress: 0,
@@ -420,16 +436,30 @@ class GestureRecognitionService {
     final effectiveCountdown = countdown.inSeconds > 0
         ? countdown
         : Duration(seconds: settings.trainingCountdownSeconds);
-    await _runCountdown(effectiveCountdown, prefix: 'Prepare gesture window');
+    final countdownCompleted = await _runCountdown(
+      effectiveCountdown,
+      prefix: 'Prepare gesture window',
+      operationId: operationId,
+    );
+    if (!countdownCompleted ||
+        !_isCaptureOperationActive(operationId, draft.gestureId)) {
+      return;
+    }
 
     try {
       final effectiveWindow =
           maxWindow ?? Duration(milliseconds: draft.isDynamic ? 2200 : 900);
-      final effectiveMinimumFrames = minimumFrames ?? (draft.isDynamic ? 24 : 12);
+      final effectiveMinimumFrames =
+          minimumFrames ?? (draft.isDynamic ? 24 : 12);
       final frames = await _collectGestureWindowFrames(
         maxWindow: effectiveWindow,
         minimumFrames: effectiveMinimumFrames,
+        operationId: operationId,
+        draftGestureId: draft.gestureId,
       );
+      if (!_isCaptureOperationActive(operationId, draft.gestureId)) {
+        return;
+      }
       if (!_featureExtractor.isPresentationActive(frames)) {
         _state = _state.copyWith(
           isRecording: false,
@@ -508,7 +538,9 @@ class GestureRecognitionService {
     final compatibleUpdatedSamples = _compatibleSamples(updatedSamples);
 
     final updatedDefinitions =
-        repository.gestures.where((gesture) => gesture.id != draft.gestureId).toList()
+        repository.gestures
+            .where((gesture) => gesture.id != draft.gestureId)
+            .toList()
           ..add(
             GestureDefinition(
               id: draft.gestureId,
@@ -544,10 +576,12 @@ class GestureRecognitionService {
 
   Future<void> deleteGesture(String gestureId) async {
     final repository = await _storageService.loadRepository();
-    final remainingSamples =
-        repository.samples.where((sample) => sample.gestureId != gestureId).toList();
-    final remainingGestures =
-        repository.gestures.where((gesture) => gesture.id != gestureId).toList();
+    final remainingSamples = repository.samples
+        .where((sample) => sample.gestureId != gestureId)
+        .toList();
+    final remainingGestures = repository.gestures
+        .where((gesture) => gesture.id != gestureId)
+        .toList();
 
     final compatibleRemainingSamples = _compatibleSamples(remainingSamples);
     final model = compatibleRemainingSamples.isEmpty
@@ -569,7 +603,103 @@ class GestureRecognitionService {
     _emit();
   }
 
+  Future<void> updateGestureDetails({
+    required String gestureId,
+    required String label,
+    required String spokenText,
+  }) async {
+    final trimmedLabel = label.trim();
+    final trimmedSpokenText = spokenText.trim().isEmpty
+        ? trimmedLabel
+        : spokenText.trim();
+    if (trimmedLabel.isEmpty) {
+      _setStatus('Gesture label cannot be empty.');
+      return;
+    }
+
+    final repository = await _storageService.loadRepository();
+    final updatedSamples = repository.samples
+        .map(
+          (sample) => sample.gestureId != gestureId
+              ? sample
+              : GestureTrainingSample(
+                  gestureId: sample.gestureId,
+                  label: trimmedLabel,
+                  spokenText: trimmedSpokenText,
+                  isDynamic: sample.isDynamic,
+                  featureVector: sample.featureVector,
+                  createdAt: sample.createdAt,
+                ),
+        )
+        .toList();
+
+    final updatedGestures = repository.gestures
+        .map(
+          (gesture) => gesture.id != gestureId
+              ? gesture
+              : GestureDefinition(
+                  id: gesture.id,
+                  label: trimmedLabel,
+                  spokenText: trimmedSpokenText,
+                  isDynamic: gesture.isDynamic,
+                  sampleCount: gesture.sampleCount,
+                  updatedAt: DateTime.now(),
+                ),
+        )
+        .toList();
+
+    final model = repository.model == null
+        ? null
+        : GestureModelSnapshot(
+            trainerType: repository.model!.trainerType,
+            featureLength: repository.model!.featureLength,
+            decisionThreshold: repository.model!.decisionThreshold,
+            trainedAt: repository.model!.trainedAt,
+            profiles: repository.model!.profiles
+                .map(
+                  (profile) => profile.gestureId != gestureId
+                      ? profile
+                      : GestureModelProfile(
+                          gestureId: profile.gestureId,
+                          label: trimmedLabel,
+                          spokenText: trimmedSpokenText,
+                          isDynamic: profile.isDynamic,
+                        ),
+                )
+                .toList(),
+            trees: repository.model!.trees,
+          );
+
+    final updatedRepository = GestureRepositorySnapshot(
+      samples: updatedSamples,
+      gestures: updatedGestures,
+      model: model,
+    );
+    await _storageService.saveRepository(updatedRepository);
+
+    final currentPrediction = _state.latestPrediction;
+    final updatedPrediction =
+        currentPrediction == null || currentPrediction.gestureId != gestureId
+        ? currentPrediction
+        : GesturePrediction(
+            gestureId: currentPrediction.gestureId,
+            label: trimmedLabel,
+            spokenText: trimmedSpokenText,
+            confidence: currentPrediction.confidence,
+            predictedAt: currentPrediction.predictedAt,
+          );
+
+    _state = _state.copyWith(
+      gestures: updatedGestures,
+      model: model,
+      latestPrediction: updatedPrediction,
+      statusMessage: 'Updated "$trimmedLabel".',
+    );
+    _emit();
+  }
+
   Future<void> discardDraft() async {
+    _captureOperationId += 1;
     _state = _state.copyWith(
       statusMessage: 'Training draft discarded.',
       clearDraft: true,
@@ -593,8 +723,18 @@ class GestureRecognitionService {
     _stateController.close();
   }
 
-  Future<void> _runCountdown(Duration duration, {required String prefix}) async {
+  Future<bool> _runCountdown(
+    Duration duration, {
+    required String prefix,
+    required int operationId,
+  }) async {
     for (var seconds = duration.inSeconds; seconds > 0; seconds--) {
+      if (!_isCaptureOperationActive(
+        operationId,
+        _state.activeDraft?.gestureId,
+      )) {
+        return false;
+      }
       _state = _state.copyWith(
         isRecording: true,
         countdownValue: seconds,
@@ -604,19 +744,34 @@ class GestureRecognitionService {
       _emit();
       await Future.delayed(const Duration(seconds: 1));
     }
+    if (!_isCaptureOperationActive(
+      operationId,
+      _state.activeDraft?.gestureId,
+    )) {
+      return false;
+    }
     _state = _state.copyWith(countdownValue: 0);
     _emit();
+    return true;
   }
 
   Future<List<List<double>>> _collectGestureWindowFrames({
     required Duration maxWindow,
     required int minimumFrames,
+    required int operationId,
+    required String draftGestureId,
   }) async {
     final frames = <List<double>>[];
     final completer = Completer<List<List<double>>>();
     final startedAt = DateTime.now();
 
     void pushSnapshot(BleGloveSnapshot snapshot) {
+      if (!_isCaptureOperationActive(operationId, draftGestureId)) {
+        if (!completer.isCompleted) {
+          completer.complete(List<List<double>>.from(frames));
+        }
+        return;
+      }
       if (snapshot.leftData == null || snapshot.rightData == null) {
         return;
       }
@@ -639,7 +794,9 @@ class GestureRecognitionService {
     }
 
     final current = _bleService.snapshot;
-    if (current.leftData != null && current.rightData != null) {
+    if (_isCaptureOperationActive(operationId, draftGestureId) &&
+        current.leftData != null &&
+        current.rightData != null) {
       pushSnapshot(current);
     }
 
@@ -706,7 +863,8 @@ class GestureRecognitionService {
 
     final now = DateTime.now();
     if (_lastPredictionAt != null &&
-        now.difference(_lastPredictionAt!) < const Duration(milliseconds: 220)) {
+        now.difference(_lastPredictionAt!) <
+            const Duration(milliseconds: 220)) {
       return;
     }
 
@@ -729,7 +887,8 @@ class GestureRecognitionService {
       _state = _state.copyWith(
         clearPrediction: true,
         isPresentationActive: false,
-        statusMessage: 'Hands inactive. Raise them to signing position to translate.',
+        statusMessage:
+            'Hands inactive. Raise them to signing position to translate.',
       );
       _emit();
       return;
@@ -768,7 +927,8 @@ class GestureRecognitionService {
       _state = _state.copyWith(
         isPresentationActive: true,
         clearPrediction: true,
-        statusMessage: 'Matching handshape found, but the movement was too weak.',
+        statusMessage:
+            'Matching handshape found, but the movement was too weak.',
       );
       _emit();
       return;
@@ -782,7 +942,8 @@ class GestureRecognitionService {
       _state = _state.copyWith(
         isPresentationActive: true,
         clearPrediction: true,
-        statusMessage: 'Movement detected. Waiting for a confident motion gesture.',
+        statusMessage:
+            'Movement detected. Waiting for a confident motion gesture.',
       );
       _emit();
       return;
@@ -842,7 +1003,8 @@ class GestureRecognitionService {
     return samples
         .where(
           (sample) =>
-              sample.featureVector.length == _featureExtractor.aggregatedFeatureCount,
+              sample.featureVector.length ==
+              _featureExtractor.aggregatedFeatureCount,
         )
         .toList();
   }
@@ -857,6 +1019,20 @@ class GestureRecognitionService {
       }
     }
     return null;
+  }
+
+  bool _isCaptureOperationActive(int operationId, String? draftGestureId) {
+    final currentDraft = _state.activeDraft;
+    if (operationId != _captureOperationId) {
+      return false;
+    }
+    if (currentDraft == null) {
+      return false;
+    }
+    if (draftGestureId != null && currentDraft.gestureId != draftGestureId) {
+      return false;
+    }
+    return true;
   }
 
   void _emit() {

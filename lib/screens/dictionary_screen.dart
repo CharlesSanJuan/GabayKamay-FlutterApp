@@ -34,7 +34,8 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
   }
 
   Future<void> _confirmDelete(GestureDefinition gesture) async {
-    final shouldDelete = await showDialog<bool>(
+    final shouldDelete =
+        await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
             title: const Text('Delete Gesture'),
@@ -58,6 +59,65 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
     }
 
     await _gestureService.deleteGesture(gesture.id);
+  }
+
+  Future<void> _editGesture(GestureDefinition gesture) async {
+    final labelController = TextEditingController(text: gesture.label);
+    final spokenController = TextEditingController(text: gesture.spokenText);
+
+    final shouldSave =
+        await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Edit Gesture'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: labelController,
+                  decoration: const InputDecoration(
+                    labelText: 'Gesture Label',
+                    hintText: 'Enter gesture label',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: spokenController,
+                  decoration: const InputDecoration(
+                    labelText: 'Spoken Text',
+                    hintText: 'Enter spoken text',
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Save'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+
+    if (!shouldSave) {
+      labelController.dispose();
+      spokenController.dispose();
+      return;
+    }
+
+    await _gestureService.updateGestureDetails(
+      gestureId: gesture.id,
+      label: labelController.text,
+      spokenText: spokenController.text,
+    );
+
+    labelController.dispose();
+    spokenController.dispose();
   }
 
   @override
@@ -88,7 +148,9 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
           const Card(
             child: Padding(
               padding: EdgeInsets.all(16),
-              child: Text('No trained gestures saved yet. Train gestures from the Training tab.'),
+              child: Text(
+                'No trained gestures saved yet. Train gestures from the Training tab.',
+              ),
             ),
           )
         else
@@ -107,12 +169,24 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                   'Windows: ${gesture.sampleCount}\nSpeaks: ${gesture.spokenText}',
                 ),
                 isThreeLine: true,
-                trailing: IconButton(
-                  icon: const Icon(Icons.delete_outline, color: Colors.red),
-                  tooltip: 'Delete Gesture',
-                  onPressed: () async {
-                    await _confirmDelete(gesture);
-                  },
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.edit_outlined),
+                      tooltip: 'Edit Gesture',
+                      onPressed: () async {
+                        await _editGesture(gesture);
+                      },
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline, color: Colors.red),
+                      tooltip: 'Delete Gesture',
+                      onPressed: () async {
+                        await _confirmDelete(gesture);
+                      },
+                    ),
+                  ],
                 ),
               ),
             ),

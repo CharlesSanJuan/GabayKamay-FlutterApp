@@ -224,12 +224,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   1,
                   !bleState.areBothConnected,
                 ),
-                navItem(
-                  Icons.book,
-                  'Dictionary',
-                  2,
-                  !bleState.areBothConnected,
-                ),
+                navItem(Icons.book, 'Dictionary', 2, false),
                 navItem(Icons.tune, 'Calibrate', 3, !bleState.areBothConnected),
               ],
             ),

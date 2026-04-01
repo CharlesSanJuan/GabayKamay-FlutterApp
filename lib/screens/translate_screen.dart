@@ -60,7 +60,7 @@ class _TranslateScreenState extends State<TranslateScreen> {
         await _speakText(prediction.spokenText);
       }
 
-      if (prediction == null && !state.isPresentationActive) {
+      if (prediction == null) {
         _lastSpokenGestureId = null;
       }
 
@@ -105,7 +105,9 @@ class _TranslateScreenState extends State<TranslateScreen> {
             return SingleChildScrollView(
               padding: const EdgeInsets.all(20),
               child: ConstrainedBox(
-                constraints: BoxConstraints(minHeight: constraints.maxHeight - 40),
+                constraints: BoxConstraints(
+                  minHeight: constraints.maxHeight - 40,
+                ),
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
@@ -113,16 +115,18 @@ class _TranslateScreenState extends State<TranslateScreen> {
                       width: double.infinity,
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: areBothConnected ? Colors.green.shade50 : Colors.red.shade50,
+                        color: areBothConnected
+                            ? Colors.green.shade50
+                            : Colors.red.shade50,
                         borderRadius: BorderRadius.circular(16),
                       ),
                       child: Text(
                         areBothConnected
                             ? recognitionState.model == null
-                                ? 'Gloves connected. Train at least one gesture to start translating.'
-                                : recognitionState.isPresentationActive
-                                    ? 'Gloves connected. Active signing position detected.'
-                                    : 'Gloves connected. Hands currently look inactive.'
+                                  ? 'Gloves connected. Train at least one gesture to start translating.'
+                                  : recognitionState.isPresentationActive
+                                  ? 'Gloves connected. Active signing position detected.'
+                                  : 'Gloves connected. Hands currently look inactive.'
                             : 'Connect both gloves to start live translation.',
                         textAlign: TextAlign.center,
                         style: TextStyle(
