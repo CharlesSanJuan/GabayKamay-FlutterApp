@@ -18,6 +18,7 @@ class AppSettings {
   final int trainingCountdownSeconds;
   final bool muteTranslationWhileTraining;
   final bool ttsEnabled;
+  final bool showThesisMetrics;
 
   const AppSettings({
     required this.confidenceThreshold,
@@ -34,6 +35,7 @@ class AppSettings {
     required this.trainingCountdownSeconds,
     required this.muteTranslationWhileTraining,
     required this.ttsEnabled,
+    required this.showThesisMetrics,
   });
 
   factory AppSettings.defaults() {
@@ -52,6 +54,7 @@ class AppSettings {
       trainingCountdownSeconds: 3,
       muteTranslationWhileTraining: true,
       ttsEnabled: true,
+      showThesisMetrics: false,
     );
   }
 
@@ -70,15 +73,18 @@ class AppSettings {
     int? trainingCountdownSeconds,
     bool? muteTranslationWhileTraining,
     bool? ttsEnabled,
+    bool? showThesisMetrics,
   }) {
     return AppSettings(
       confidenceThreshold: confidenceThreshold ?? this.confidenceThreshold,
-      dynamicMotionThreshold: dynamicMotionThreshold ?? this.dynamicMotionThreshold,
+      dynamicMotionThreshold:
+          dynamicMotionThreshold ?? this.dynamicMotionThreshold,
       presentationGyroThreshold:
           presentationGyroThreshold ?? this.presentationGyroThreshold,
       presentationFlexThreshold:
           presentationFlexThreshold ?? this.presentationFlexThreshold,
-      presentationAccelerationThreshold: presentationAccelerationThreshold ??
+      presentationAccelerationThreshold:
+          presentationAccelerationThreshold ??
           this.presentationAccelerationThreshold,
       presentationPoseThreshold:
           presentationPoseThreshold ?? this.presentationPoseThreshold,
@@ -93,67 +99,71 @@ class AppSettings {
       muteTranslationWhileTraining:
           muteTranslationWhileTraining ?? this.muteTranslationWhileTraining,
       ttsEnabled: ttsEnabled ?? this.ttsEnabled,
+      showThesisMetrics: showThesisMetrics ?? this.showThesisMetrics,
     );
   }
 
   Map<String, dynamic> toJson() => {
-        'confidenceThreshold': confidenceThreshold,
-        'dynamicMotionThreshold': dynamicMotionThreshold,
-        'presentationGyroThreshold': presentationGyroThreshold,
-        'presentationFlexThreshold': presentationFlexThreshold,
-        'presentationAccelerationThreshold': presentationAccelerationThreshold,
-        'presentationPoseThreshold': presentationPoseThreshold,
-        'flexSmoothingAlpha': flexSmoothingAlpha,
-        'imuSmoothingAlpha': imuSmoothingAlpha,
-        'flexDeadband': flexDeadband,
-        'imuDeadband': imuDeadband,
-        'trainingAutoCaptureEnabled': trainingAutoCaptureEnabled,
-        'trainingCountdownSeconds': trainingCountdownSeconds,
-        'muteTranslationWhileTraining': muteTranslationWhileTraining,
-        'ttsEnabled': ttsEnabled,
-      };
+    'confidenceThreshold': confidenceThreshold,
+    'dynamicMotionThreshold': dynamicMotionThreshold,
+    'presentationGyroThreshold': presentationGyroThreshold,
+    'presentationFlexThreshold': presentationFlexThreshold,
+    'presentationAccelerationThreshold': presentationAccelerationThreshold,
+    'presentationPoseThreshold': presentationPoseThreshold,
+    'flexSmoothingAlpha': flexSmoothingAlpha,
+    'imuSmoothingAlpha': imuSmoothingAlpha,
+    'flexDeadband': flexDeadband,
+    'imuDeadband': imuDeadband,
+    'trainingAutoCaptureEnabled': trainingAutoCaptureEnabled,
+    'trainingCountdownSeconds': trainingCountdownSeconds,
+    'muteTranslationWhileTraining': muteTranslationWhileTraining,
+    'ttsEnabled': ttsEnabled,
+    'showThesisMetrics': showThesisMetrics,
+  };
 
   factory AppSettings.fromJson(Map<String, dynamic> json) {
     final defaults = AppSettings.defaults();
     return AppSettings(
       confidenceThreshold:
           (json['confidenceThreshold'] as num?)?.toDouble() ??
-              defaults.confidenceThreshold,
+          defaults.confidenceThreshold,
       dynamicMotionThreshold:
           (json['dynamicMotionThreshold'] as num?)?.toDouble() ??
-              defaults.dynamicMotionThreshold,
+          defaults.dynamicMotionThreshold,
       presentationGyroThreshold:
           (json['presentationGyroThreshold'] as num?)?.toDouble() ??
-              defaults.presentationGyroThreshold,
+          defaults.presentationGyroThreshold,
       presentationFlexThreshold:
           (json['presentationFlexThreshold'] as num?)?.toDouble() ??
-              defaults.presentationFlexThreshold,
+          defaults.presentationFlexThreshold,
       presentationAccelerationThreshold:
           (json['presentationAccelerationThreshold'] as num?)?.toDouble() ??
-              defaults.presentationAccelerationThreshold,
+          defaults.presentationAccelerationThreshold,
       presentationPoseThreshold:
           (json['presentationPoseThreshold'] as num?)?.toDouble() ??
-              defaults.presentationPoseThreshold,
+          defaults.presentationPoseThreshold,
       flexSmoothingAlpha:
           (json['flexSmoothingAlpha'] as num?)?.toDouble() ??
-              defaults.flexSmoothingAlpha,
+          defaults.flexSmoothingAlpha,
       imuSmoothingAlpha:
           (json['imuSmoothingAlpha'] as num?)?.toDouble() ??
-              defaults.imuSmoothingAlpha,
+          defaults.imuSmoothingAlpha,
       flexDeadband:
           (json['flexDeadband'] as num?)?.toDouble() ?? defaults.flexDeadband,
       imuDeadband:
           (json['imuDeadband'] as num?)?.toDouble() ?? defaults.imuDeadband,
       trainingAutoCaptureEnabled:
           json['trainingAutoCaptureEnabled'] as bool? ??
-              defaults.trainingAutoCaptureEnabled,
+          defaults.trainingAutoCaptureEnabled,
       trainingCountdownSeconds:
           json['trainingCountdownSeconds'] as int? ??
-              defaults.trainingCountdownSeconds,
+          defaults.trainingCountdownSeconds,
       muteTranslationWhileTraining:
           json['muteTranslationWhileTraining'] as bool? ??
-              defaults.muteTranslationWhileTraining,
+          defaults.muteTranslationWhileTraining,
       ttsEnabled: json['ttsEnabled'] as bool? ?? defaults.ttsEnabled,
+      showThesisMetrics:
+          json['showThesisMetrics'] as bool? ?? defaults.showThesisMetrics,
     );
   }
 }

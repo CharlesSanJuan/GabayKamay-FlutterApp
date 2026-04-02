@@ -17,6 +17,24 @@ abstract class GestureTrainer {
   );
 }
 
+class RecognitionMetricRecord {
+  final String gestureId;
+  final String label;
+  final double confidence;
+  final double latencyMs;
+  final double inferenceTimeMs;
+  final DateTime recognizedAt;
+
+  const RecognitionMetricRecord({
+    required this.gestureId,
+    required this.label,
+    required this.confidence,
+    required this.latencyMs,
+    required this.inferenceTimeMs,
+    required this.recognizedAt,
+  });
+}
+
 class RandomForestGestureTrainer implements GestureTrainer {
   RandomForestGestureTrainer({
     this.treeCount = 21,
@@ -331,9 +349,27 @@ class GestureRecognitionService {
   String? _lastCandidateGestureId;
   int _candidateCount = 0;
   int _captureOperationId = 0;
+  double? _latestLatencyMs;
+  double? _latestInferenceTimeMs;
+  final List<RecognitionMetricRecord> _recognitionHistory = [];
 
   Stream<GestureRecognitionState> get states => _stateController.stream;
   GestureRecognitionState get state => _state;
+  double? get latestLatencyMs => _latestLatencyMs;
+  double? get latestInferenceTimeMs => _latestInferenceTimeMs;
+  List<RecognitionMetricRecord> get recognitionHistory =>
+      List.unmodifiable(_recognitionHistory);
+
+  Future<void> reloadRepository() async {
+    await ensureInitialized();
+    await _loadRepositoryIntoState();
+  }
+
+  Future<void> importRepositoryFromEncodedJson(String encoded) async {
+    final imported = GestureRepositorySnapshot.fromEncodedJson(encoded);
+    await _storageService.saveRepository(imported);
+    await reloadRepository();
+  }
 
   Future<void> ensureInitialized() async {
     if (_initialized) {
@@ -343,29 +379,7 @@ class GestureRecognitionService {
 
     _initialized = true;
     await _settingsService.ensureInitialized();
-    final repository = await _storageService.loadRepository();
-    final compatibleSamples = _compatibleSamples(repository.samples);
-    final retrainedModel = compatibleSamples.isEmpty
-        ? null
-        : _trainer.train(compatibleSamples);
-
-    _state = _state.copyWith(
-      isReady: true,
-      statusMessage: retrainedModel == null
-          ? 'Ready. Connect gloves, calibrate, then collect training windows.'
-          : 'Ready. ${repository.gestures.length} trained gestures loaded.',
-      gestures: repository.gestures,
-      model: retrainedModel,
-    );
-
-    if (compatibleSamples.length != repository.samples.length) {
-      final cleaned = GestureRepositorySnapshot(
-        samples: compatibleSamples,
-        gestures: repository.gestures,
-        model: retrainedModel,
-      );
-      await _storageService.saveRepository(cleaned);
-    }
+    await _loadRepositoryIntoState();
 
     await _bleService.ensureInitialized();
     _bleSub = _bleService.snapshots.listen(_handleBleSnapshot);
@@ -402,6 +416,45 @@ class GestureRecognitionService {
         spokenText: trimmedSpokenText,
         isDynamic: isDynamic,
         targetSamples: max(1, targetSamples),
+        capturedSamples: const [],
+      ),
+    );
+    _emit();
+  }
+
+  Future<void> startAdditionalSamplesDraft({
+    required String gestureId,
+    int additionalSamples = 5,
+  }) async {
+    await ensureInitialized();
+    if (!_isCalibrationReady()) {
+      _setStatus(
+        'Calibration must be completed for both gloves before training.',
+      );
+      return;
+    }
+
+    GestureDefinition? gesture;
+    for (final item in _state.gestures) {
+      if (item.id == gestureId) {
+        gesture = item;
+        break;
+      }
+    }
+    if (gesture == null) {
+      _setStatus('Gesture not found. Refresh the dictionary and try again.');
+      return;
+    }
+
+    _state = _state.copyWith(
+      statusMessage:
+          'Adding $additionalSamples more windows to "${gesture.label}".',
+      activeDraft: TrainingDraft(
+        gestureId: gesture.id,
+        label: gesture.label,
+        spokenText: gesture.spokenText,
+        isDynamic: gesture.isDynamic,
+        targetSamples: max(1, additionalSamples),
         capturedSamples: const [],
       ),
     );
@@ -534,7 +587,16 @@ class GestureRecognitionService {
     final retainedSamples = compatibleExistingSamples
         .where((sample) => sample.gestureId != draft.gestureId)
         .toList();
-    final updatedSamples = [...retainedSamples, ...draft.capturedSamples];
+    final existingGestureSamples = compatibleExistingSamples
+        .where((sample) => sample.gestureId == draft.gestureId)
+        .toList();
+    final addedSampleCount = draft.capturedSamples.length;
+    final totalSampleCount = existingGestureSamples.length + addedSampleCount;
+    final updatedSamples = [
+      ...retainedSamples,
+      ...existingGestureSamples,
+      ...draft.capturedSamples,
+    ];
     final compatibleUpdatedSamples = _compatibleSamples(updatedSamples);
 
     final updatedDefinitions =
@@ -547,7 +609,7 @@ class GestureRecognitionService {
               label: draft.label,
               spokenText: draft.spokenText,
               isDynamic: draft.isDynamic,
-              sampleCount: draft.capturedSamples.length,
+              sampleCount: totalSampleCount,
               updatedAt: DateTime.now(),
             ),
           );
@@ -563,8 +625,9 @@ class GestureRecognitionService {
     await _storageService.saveRepository(updatedRepository);
 
     _state = _state.copyWith(
-      statusMessage:
-          'Saved "${draft.label}" with ${draft.capturedSamples.length} windows. Model retrained.',
+      statusMessage: existingGestureSamples.isEmpty
+          ? 'Saved "${draft.label}" with $totalSampleCount windows. Model retrained.'
+          : 'Added $addedSampleCount windows to "${draft.label}" ($totalSampleCount total). Model retrained.',
       gestures: updatedDefinitions,
       model: model,
       clearDraft: true,
@@ -716,6 +779,46 @@ class GestureRecognitionService {
     _candidateCount = 0;
     _state = _state.copyWith(clearPrediction: true);
     _emit();
+  }
+
+  Future<void> _loadRepositoryIntoState() async {
+    final repository = await _storageService.loadRepository();
+    final compatibleSamples = _compatibleSamples(repository.samples);
+    final retrainedModel = compatibleSamples.isEmpty
+        ? null
+        : _trainer.train(compatibleSamples);
+
+    _lastPredictionAt = null;
+    _lastCommittedGestureId = null;
+    _lastCandidateGestureId = null;
+    _candidateCount = 0;
+    _latestLatencyMs = null;
+    _latestInferenceTimeMs = null;
+    _recognitionHistory.clear();
+    _inferenceFrames.clear();
+
+    _state = _state.copyWith(
+      isReady: true,
+      statusMessage: retrainedModel == null
+          ? 'Ready. Connect gloves, calibrate, then collect training windows.'
+          : 'Ready. ${repository.gestures.length} trained gestures loaded.',
+      gestures: repository.gestures,
+      model: retrainedModel,
+      clearDraft: true,
+      clearPrediction: true,
+      isPresentationActive: false,
+      captureProgress: 0,
+      countdownValue: 0,
+    );
+
+    if (compatibleSamples.length != repository.samples.length) {
+      final cleaned = GestureRepositorySnapshot(
+        samples: compatibleSamples,
+        gestures: repository.gestures,
+        model: retrainedModel,
+      );
+      await _storageService.saveRepository(cleaned);
+    }
   }
 
   void dispose() {
@@ -894,6 +997,7 @@ class GestureRecognitionService {
       return;
     }
 
+    final inferenceStopwatch = Stopwatch()..start();
     final featureVector = _featureExtractor.aggregateWindow(activeWindow);
     final prediction = _trainer.predict(
       model,
@@ -949,6 +1053,7 @@ class GestureRecognitionService {
       return;
     }
 
+    inferenceStopwatch.stop();
     _lastPredictionAt = now;
     if (_lastCandidateGestureId == prediction.gestureId) {
       _candidateCount += 1;
@@ -978,6 +1083,34 @@ class GestureRecognitionService {
     }
 
     _lastCommittedGestureId = prediction.gestureId;
+    final synchronizedInputAt =
+        snapshot.leftLastPacketAt == null || snapshot.rightLastPacketAt == null
+        ? null
+        : snapshot.leftLastPacketAt!.isBefore(snapshot.rightLastPacketAt!)
+        ? snapshot.leftLastPacketAt!
+        : snapshot.rightLastPacketAt!;
+    final latencyMs = synchronizedInputAt == null
+        ? null
+        : prediction.predictedAt
+                  .difference(synchronizedInputAt)
+                  .inMicroseconds /
+              1000.0;
+    _latestLatencyMs = latencyMs == null ? null : max(0.0, latencyMs);
+    _latestInferenceTimeMs = inferenceStopwatch.elapsedMicroseconds / 1000.0;
+    _recognitionHistory.insert(
+      0,
+      RecognitionMetricRecord(
+        gestureId: prediction.gestureId,
+        label: prediction.label,
+        confidence: prediction.confidence,
+        latencyMs: _latestLatencyMs ?? 0.0,
+        inferenceTimeMs: _latestInferenceTimeMs ?? 0.0,
+        recognizedAt: prediction.predictedAt,
+      ),
+    );
+    if (_recognitionHistory.length > 25) {
+      _recognitionHistory.removeRange(25, _recognitionHistory.length);
+    }
     _state = _state.copyWith(
       isPresentationActive: true,
       latestPrediction: prediction,

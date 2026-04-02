@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../services/app_settings_service.dart';
 import '../services/ble_connection_state.dart';
 import '../services/ble_glove_service.dart';
 import 'calibration_screen.dart';
@@ -22,14 +23,21 @@ class _HomeScreenState extends State<HomeScreen> {
   final Color primaryOrange = Colors.orange;
   final BleConnectionState _bleState = BleConnectionState();
   final BleGloveService _bleService = BleGloveService();
+  final AppSettingsService _settingsService = AppSettingsService();
   bool _disconnectDialogOpen = false;
 
   late StreamSubscription<BleConnectionUpdate> _connectionSubscription;
+  StreamSubscription<AppSettings>? _settingsSubscription;
 
   @override
   void initState() {
     super.initState();
     _bleService.ensureInitialized();
+    _settingsService.ensureInitialized().then((_) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
 
     _connectionSubscription = _bleState.connectionStateUpdates.listen((update) {
       if (mounted) {
@@ -40,11 +48,17 @@ class _HomeScreenState extends State<HomeScreen> {
         _showDisconnectDialog(update.gloveName);
       }
     });
+    _settingsSubscription = _settingsService.changes.listen((_) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
   }
 
   @override
   void dispose() {
     _connectionSubscription.cancel();
+    _settingsSubscription?.cancel();
     super.dispose();
   }
 
@@ -81,6 +95,7 @@ class _HomeScreenState extends State<HomeScreen> {
       initialData: _bleService.snapshot,
       builder: (context, snapshot) {
         final bleState = snapshot.data ?? _bleService.snapshot;
+        final settings = _settingsService.settings;
 
         return Scaffold(
           backgroundColor: Colors.grey[200],
@@ -160,17 +175,21 @@ class _HomeScreenState extends State<HomeScreen> {
                         ],
                       ),
                       const SizedBox(height: 8),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton.icon(
-                          icon: const Icon(Icons.analytics),
-                          label: const Text('Thesis Metrics'),
-                          onPressed: () {
-                            Navigator.of(context).pushNamed('/thesis_metrics');
-                          },
+                      if (settings.showThesisMetrics) ...[
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            icon: const Icon(Icons.analytics),
+                            label: const Text('Thesis Metrics'),
+                            onPressed: () {
+                              Navigator.of(
+                                context,
+                              ).pushNamed('/thesis_metrics');
+                            },
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 8),
+                        const SizedBox(height: 8),
+                      ],
                       Text(
                         bleState.areBothConnected
                             ? 'Gloves connected | Packets: L ${bleState.leftPacketCount} R ${bleState.rightPacketCount}'

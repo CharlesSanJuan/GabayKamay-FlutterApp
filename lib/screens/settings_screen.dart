@@ -1,8 +1,11 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 
 import '../services/app_settings_service.dart';
+import '../services/gesture_recognition_service.dart';
+import '../services/gesture_transfer_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -13,6 +16,8 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   final AppSettingsService _settingsService = AppSettingsService();
+  final GestureRecognitionService _gestureService = GestureRecognitionService();
+  final GestureTransferService _transferService = GestureTransferService();
   StreamSubscription<AppSettings>? _settingsSub;
 
   @override
@@ -40,14 +45,90 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await _settingsService.save(settings);
   }
 
+  Future<void> _exportLibrary() async {
+    try {
+      final file = await _transferService.exportRepositoryToTempFile();
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Gesture library prepared at ${file.path.split(Platform.pathSeparator).last}. Opening share sheet...',
+          ),
+        ),
+      );
+      await _transferService.shareFile(file);
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Export failed: $e')));
+    }
+  }
+
+  Future<void> _importLibrary() async {
+    final shouldReplace =
+        await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Import Gesture Library'),
+            content: const Text(
+              'Importing will replace the current trained gestures on this phone with the selected JSON library. Continue?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Replace Library'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!shouldReplace) {
+      return;
+    }
+
+    try {
+      final pickedPath = await _transferService.pickImportFilePath();
+      if (pickedPath == null) {
+        return;
+      }
+      final encoded = await File(pickedPath).readAsString();
+      await _gestureService.importRepositoryFromEncodedJson(encoded);
+      if (!mounted) {
+        return;
+      }
+      final gestureCount = _gestureService.state.gestures.length;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Imported gesture library successfully. $gestureCount gestures are now available.',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Import failed: $e')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final settings = _settingsService.settings;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Recognition Settings'),
-      ),
+      appBar: AppBar(title: const Text('Recognition Settings')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -82,9 +163,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 min: 0.02,
                 max: 1.0,
                 divisions: 49,
-                valueText: settings.presentationGyroThreshold.toStringAsFixed(2),
+                valueText: settings.presentationGyroThreshold.toStringAsFixed(
+                  2,
+                ),
                 onChanged: (value) async {
-                  await _save(settings.copyWith(presentationGyroThreshold: value));
+                  await _save(
+                    settings.copyWith(presentationGyroThreshold: value),
+                  );
                 },
               ),
               _SliderTile(
@@ -107,9 +192,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 min: 1.0,
                 max: 20.0,
                 divisions: 38,
-                valueText: settings.presentationFlexThreshold.toStringAsFixed(1),
+                valueText: settings.presentationFlexThreshold.toStringAsFixed(
+                  1,
+                ),
                 onChanged: (value) async {
-                  await _save(settings.copyWith(presentationFlexThreshold: value));
+                  await _save(
+                    settings.copyWith(presentationFlexThreshold: value),
+                  );
                 },
               ),
             ],
@@ -200,6 +289,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   await _save(settings.copyWith(ttsEnabled: value));
                 },
               ),
+              SwitchListTile.adaptive(
+                value: settings.showThesisMetrics,
+                title: const Text('Show Thesis Metrics Button'),
+                subtitle: const Text(
+                  'Makes the thesis metrics entry visible on the home screen.',
+                ),
+                onChanged: (value) async {
+                  await _save(settings.copyWith(showThesisMetrics: value));
+                },
+              ),
               ListTile(
                 title: const Text('Training Countdown'),
                 subtitle: Text('${settings.trainingCountdownSeconds} seconds'),
@@ -217,7 +316,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     if (value == null) {
                       return;
                     }
-                    await _save(settings.copyWith(trainingCountdownSeconds: value));
+                    await _save(
+                      settings.copyWith(trainingCountdownSeconds: value),
+                    );
                   },
                 ),
               ),
@@ -226,6 +327,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   await _settingsService.reset();
                 },
                 child: const Text('Reset Settings To Defaults'),
+              ),
+            ],
+          ),
+          _Section(
+            title: 'Gesture Library Transfer',
+            children: [
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.ios_share_outlined),
+                title: const Text('Export Gesture Library'),
+                subtitle: const Text(
+                  'Creates a JSON copy of your trained gestures and opens the share sheet.',
+                ),
+                onTap: _exportLibrary,
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.file_download_outlined),
+                title: const Text('Import Gesture Library'),
+                subtitle: const Text(
+                  'Replaces this phone\'s current trained library with an exported JSON file.',
+                ),
+                onTap: _importLibrary,
               ),
             ],
           ),
@@ -239,10 +363,7 @@ class _Section extends StatelessWidget {
   final String title;
   final List<Widget> children;
 
-  const _Section({
-    required this.title,
-    required this.children,
-  });
+  const _Section({required this.title, required this.children});
 
   @override
   Widget build(BuildContext context) {
@@ -255,9 +376,9 @@ class _Section extends StatelessWidget {
           children: [
             Text(
               title,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
             ...children,
@@ -302,10 +423,7 @@ class _SliderTile extends StatelessWidget {
       ),
       trailing: SizedBox(
         width: 52,
-        child: Text(
-          valueText,
-          textAlign: TextAlign.end,
-        ),
+        child: Text(valueText, textAlign: TextAlign.end),
       ),
     );
   }

@@ -42,6 +42,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
       if (mounted) {
         setState(() {});
       }
+      _syncDraftFields(state.activeDraft);
       _scheduleAutoCaptureIfNeeded(state);
     });
     _settingsSub = _settingsService.changes.listen((_) {
@@ -67,7 +68,9 @@ class _TrainingScreenState extends State<TrainingScreen> {
         draft == null ||
         state.isRecording ||
         draft.isComplete) {
-      if (draft == null || draft.isComplete || !settings.trainingAutoCaptureEnabled) {
+      if (draft == null ||
+          draft.isComplete ||
+          !settings.trainingAutoCaptureEnabled) {
         _autoCaptureDraftId = null;
         _autoCaptureCapturedCount = null;
       }
@@ -101,6 +104,25 @@ class _TrainingScreenState extends State<TrainingScreen> {
 
       await _gestureService.captureTrainingSample(countdown: Duration.zero);
     });
+  }
+
+  void _syncDraftFields(TrainingDraft? draft) {
+    if (draft == null) {
+      return;
+    }
+    if (_labelController.text != draft.label) {
+      _labelController.text = draft.label;
+    }
+    if (_spokenTextController.text != draft.spokenText) {
+      _spokenTextController.text = draft.spokenText;
+    }
+    if (_targetSamples != draft.targetSamples ||
+        _isDynamicGesture != draft.isDynamic) {
+      setState(() {
+        _targetSamples = draft.targetSamples;
+        _isDynamicGesture = draft.isDynamic;
+      });
+    }
   }
 
   Future<void> _startDraft() async {
@@ -138,7 +160,10 @@ class _TrainingScreenState extends State<TrainingScreen> {
         : draft.capturedCount / draft.targetSamples;
     final remainingCount = draft == null
         ? 0
-        : (draft.targetSamples - draft.capturedCount).clamp(0, draft.targetSamples);
+        : (draft.targetSamples - draft.capturedCount).clamp(
+            0,
+            draft.targetSamples,
+          );
 
     return SafeArea(
       child: SingleChildScrollView(
@@ -150,7 +175,9 @@ class _TrainingScreenState extends State<TrainingScreen> {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: areBothConnected ? Colors.green.shade50 : Colors.red.shade50,
+                color: areBothConnected
+                    ? Colors.green.shade50
+                    : Colors.red.shade50,
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(
                   color: areBothConnected ? Colors.green : Colors.red,
@@ -161,7 +188,9 @@ class _TrainingScreenState extends State<TrainingScreen> {
                     ? 'Both gloves are connected. Train with repeated capture windows so the random forest can learn a full motion pattern, not only one frozen frame.'
                     : 'Both gloves must stay connected before training.',
                 style: TextStyle(
-                  color: areBothConnected ? Colors.green.shade800 : Colors.red.shade800,
+                  color: areBothConnected
+                      ? Colors.green.shade800
+                      : Colors.red.shade800,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -273,7 +302,9 @@ class _TrainingScreenState extends State<TrainingScreen> {
                       ],
                     ),
                     const SizedBox(height: 10),
-                    LinearProgressIndicator(value: draft == null ? 0 : draftProgress),
+                    LinearProgressIndicator(
+                      value: draft == null ? 0 : draftProgress,
+                    ),
                     const SizedBox(height: 12),
                     if (recognitionState.countdownValue > 0)
                       Text(
@@ -287,8 +318,8 @@ class _TrainingScreenState extends State<TrainingScreen> {
                       Text(
                         recognitionState.isRecording
                             ? (draft?.isDynamic ?? _isDynamicGesture
-                                ? 'Move through the full gesture path now.'
-                                : 'Hold the sign steady now.')
+                                  ? 'Move through the full gesture path now.'
+                                  : 'Hold the sign steady now.')
                             : 'Remaining repetitions: $remainingCount',
                       ),
                     const SizedBox(height: 8),
@@ -303,10 +334,10 @@ class _TrainingScreenState extends State<TrainingScreen> {
                       recognitionState.isRecording
                           ? '${(recognitionState.captureProgress * 100).toStringAsFixed(0)}% of the current window captured'
                           : draft == null
-                              ? 'Create a draft to begin.'
-                              : settings.trainingAutoCaptureEnabled
-                                  ? 'Auto-capture is on. The next repetition will begin automatically.'
-                                  : 'Tap capture when you are ready for the next repetition.',
+                          ? 'Create a draft to begin.'
+                          : settings.trainingAutoCaptureEnabled
+                          ? 'Auto-capture is on. The next repetition will begin automatically.'
+                          : 'Tap capture when you are ready for the next repetition.',
                     ),
                   ],
                 ),
@@ -330,8 +361,8 @@ class _TrainingScreenState extends State<TrainingScreen> {
                 recognitionState.isRecording
                     ? 'Capturing Window...'
                     : draft == null
-                        ? 'Create draft first'
-                        : 'Capture Next Window',
+                    ? 'Create draft first'
+                    : 'Capture Next Window',
               ),
             ),
             const SizedBox(height: 12),
@@ -394,10 +425,18 @@ class _TrainingScreenState extends State<TrainingScreen> {
                     ),
                     SizedBox(height: 8),
                     Text('1. Tap capture and use the countdown to get ready.'),
-                    Text('2. Static mode: hold the sign still until the bar fills.'),
-                    Text('3. Movement mode: complete the whole path during the capture window.'),
-                    Text('4. The model trains on a full time window, so movement signs are supported.'),
-                    Text('5. Repeat until the progress bar reaches the target, then save.'),
+                    Text(
+                      '2. Static mode: hold the sign still until the bar fills.',
+                    ),
+                    Text(
+                      '3. Movement mode: complete the whole path during the capture window.',
+                    ),
+                    Text(
+                      '4. The model trains on a full time window, so movement signs are supported.',
+                    ),
+                    Text(
+                      '5. Repeat until the progress bar reaches the target, then save.',
+                    ),
                   ],
                 ),
               ),

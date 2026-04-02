@@ -120,6 +120,59 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
     spokenController.dispose();
   }
 
+  Future<void> _addSamplesToGesture(GestureDefinition gesture) async {
+    final samplesController = TextEditingController(text: '5');
+    final additionalSamples =
+        await showDialog<int>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Add More Samples'),
+            content: TextField(
+              controller: samplesController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Additional Windows',
+                hintText: 'Enter number of new samples',
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () {
+                  final parsed = int.tryParse(samplesController.text.trim());
+                  Navigator.pop(context, parsed);
+                },
+                child: const Text('Continue'),
+              ),
+            ],
+          ),
+        ) ??
+        0;
+    samplesController.dispose();
+
+    if (additionalSamples <= 0) {
+      return;
+    }
+
+    await _gestureService.startAdditionalSamplesDraft(
+      gestureId: gesture.id,
+      additionalSamples: additionalSamples,
+    );
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Opened "${gesture.label}" for more training. Switch to the Training tab to capture $additionalSamples new windows.',
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = _gestureService.state;
@@ -172,6 +225,13 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    IconButton(
+                      icon: const Icon(Icons.library_add_outlined),
+                      tooltip: 'Add More Samples',
+                      onPressed: () async {
+                        await _addSamplesToGesture(gesture);
+                      },
+                    ),
                     IconButton(
                       icon: const Icon(Icons.edit_outlined),
                       tooltip: 'Edit Gesture',

@@ -53,10 +53,9 @@ class _ThesisMetricsScreenState extends State<ThesisMetricsScreen> {
         final bleState = snapshot.data ?? _bleService.snapshot;
         final recognitionState = _gestureService.state;
         final latestPrediction = recognitionState.latestPrediction;
-        final estimatedLatencyMs = _estimateLatencyMs(
-          bleState: bleState,
-          prediction: latestPrediction,
-        );
+        final latestLatencyMs = _gestureService.latestLatencyMs;
+        final latestInferenceTimeMs = _gestureService.latestInferenceTimeMs;
+        final recognitionHistory = _gestureService.recognitionHistory;
         final uptime = bleState.bothConnectedSince == null
             ? 'Not connected'
             : _formatDuration(
@@ -166,15 +165,33 @@ class _ThesisMetricsScreenState extends State<ThesisMetricsScreen> {
                   ),
                   _MetricRow(
                     label: 'Estimated latency',
-                    value: estimatedLatencyMs == null
+                    value: latestLatencyMs == null
                         ? 'N/A'
-                        : '${estimatedLatencyMs.toStringAsFixed(1)} ms',
+                        : '${latestLatencyMs.toStringAsFixed(1)} ms',
+                  ),
+                  _MetricRow(
+                    label: 'Inference time',
+                    value: latestInferenceTimeMs == null
+                        ? 'N/A'
+                        : '${latestInferenceTimeMs.toStringAsFixed(1)} ms',
                   ),
                   _MetricRow(
                     label: 'Status',
                     value: recognitionState.statusMessage,
                   ),
                 ],
+              ),
+              const SizedBox(height: 12),
+              _MetricSection(
+                title: 'Recognition History',
+                children: recognitionHistory.isEmpty
+                    ? const [
+                        Text('No recognized gestures yet for this session.'),
+                      ]
+                    : [
+                        for (final record in recognitionHistory)
+                          _RecognitionHistoryTile(record: record),
+                      ],
               ),
               const SizedBox(height: 12),
               _MetricSection(
@@ -216,34 +233,49 @@ class _ThesisMetricsScreenState extends State<ThesisMetricsScreen> {
     return '${((smaller / larger) * 100).toStringAsFixed(1)}%';
   }
 
-  double? _estimateLatencyMs({
-    required BleGloveSnapshot bleState,
-    required GesturePrediction? prediction,
-  }) {
-    if (prediction == null ||
-        bleState.leftLastPacketAt == null ||
-        bleState.rightLastPacketAt == null) {
-      return null;
-    }
-
-    final synchronizedInputAt =
-        bleState.leftLastPacketAt!.isBefore(bleState.rightLastPacketAt!)
-        ? bleState.leftLastPacketAt!
-        : bleState.rightLastPacketAt!;
-    final latencyUs = prediction.predictedAt
-        .difference(synchronizedInputAt)
-        .inMicroseconds;
-    if (latencyUs <= 0) {
-      return 0.0;
-    }
-    return latencyUs / 1000.0;
-  }
-
   String _formatDuration(Duration duration) {
     final hours = duration.inHours.toString().padLeft(2, '0');
     final minutes = (duration.inMinutes % 60).toString().padLeft(2, '0');
     final seconds = (duration.inSeconds % 60).toString().padLeft(2, '0');
     return '$hours:$minutes:$seconds';
+  }
+}
+
+class _RecognitionHistoryTile extends StatelessWidget {
+  final RecognitionMetricRecord record;
+
+  const _RecognitionHistoryTile({required this.record});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(
+          alpha: 0.35,
+        ),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            record.label,
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Confidence: ${(record.confidence * 100).toStringAsFixed(1)}% | Inference: ${record.inferenceTimeMs.toStringAsFixed(1)} ms | Latency: ${record.latencyMs.toStringAsFixed(1)} ms',
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Recognized at: ${record.recognizedAt.toLocal().toString().split('.').first}',
+          ),
+        ],
+      ),
+    );
   }
 }
 
