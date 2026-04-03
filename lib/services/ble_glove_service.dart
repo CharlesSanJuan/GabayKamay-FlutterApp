@@ -139,6 +139,7 @@ class BleGloveService {
 
   Future<void> ensureInitialized() async {
     await _settingsService.ensureInitialized();
+    await _calibration.ensureInitialized();
     _attachScanResultsListener();
     await refreshConnectionStates();
     _emit();
@@ -509,7 +510,13 @@ class BleGloveService {
       final calibration = _calibration.getCalibration(gloveName);
       final calibratedFlex = List<double>.generate(5, (i) {
         if (calibration.isComplete) {
-          return calibration.mapToPercent(i, rawFlex[i]);
+          return calibration.mapToPercent(
+            i,
+            rawFlex[i],
+            thumbMinimumSpan: i == 0
+                ? _settingsService.settings.thumbFlexMinimumSpan
+                : null,
+          );
         }
         return rawFlex[i];
       });
@@ -567,7 +574,13 @@ class BleGloveService {
       final calibration = _calibration.getCalibration(gloveName);
       final calibratedFlex = List<double>.generate(5, (i) {
         if (calibration.isComplete) {
-          return calibration.mapToPercent(i, rawFlex[i]);
+          return calibration.mapToPercent(
+            i,
+            rawFlex[i],
+            thumbMinimumSpan: i == 0
+                ? _settingsService.settings.thumbFlexMinimumSpan
+                : null,
+          );
         }
         return rawFlex[i];
       });

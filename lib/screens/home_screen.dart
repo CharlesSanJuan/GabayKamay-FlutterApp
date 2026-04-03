@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../services/app_settings_service.dart';
 import '../services/ble_connection_state.dart';
 import '../services/ble_glove_service.dart';
+import '../services/session_state_service.dart';
 import 'calibration_screen.dart';
 import 'dictionary_screen.dart';
 import 'training_screen.dart';
@@ -24,6 +25,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final BleConnectionState _bleState = BleConnectionState();
   final BleGloveService _bleService = BleGloveService();
   final AppSettingsService _settingsService = AppSettingsService();
+  final SessionStateService _sessionStateService = SessionStateService();
   bool _disconnectDialogOpen = false;
 
   late StreamSubscription<BleConnectionUpdate> _connectionSubscription;
@@ -36,6 +38,13 @@ class _HomeScreenState extends State<HomeScreen> {
     _settingsService.ensureInitialized().then((_) {
       if (mounted) {
         setState(() {});
+      }
+    });
+    _sessionStateService.ensureInitialized().then((_) {
+      if (mounted) {
+        setState(() {
+          currentIndex = _sessionStateService.snapshot.homeTabIndex.clamp(0, 3);
+        });
       }
     });
 
@@ -271,6 +280,9 @@ class _HomeScreenState extends State<HomeScreen> {
               setState(() {
                 currentIndex = index;
               });
+              _sessionStateService.save(
+                _sessionStateService.snapshot.copyWith(homeTabIndex: index),
+              );
             },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 300),

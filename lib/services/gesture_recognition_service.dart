@@ -5,6 +5,7 @@ import '../models/gesture_models.dart';
 import 'app_settings_service.dart';
 import 'ble_glove_service.dart';
 import 'gesture_feature_extractor.dart';
+import 'session_state_service.dart';
 import 'gesture_storage_service.dart';
 import 'glove_calibration_service.dart';
 
@@ -32,6 +33,34 @@ class RecognitionMetricRecord {
     required this.latencyMs,
     required this.inferenceTimeMs,
     required this.recognizedAt,
+  });
+}
+
+class SaveDiagnosticsRecord {
+  final String gestureLabel;
+  final int draftSamples;
+  final int totalSamplesAfterSave;
+  final int trainedGestureCount;
+  final int featureLength;
+  final double loadRepositoryMs;
+  final double samplePreparationMs;
+  final double trainModelMs;
+  final double writeRepositoryMs;
+  final double totalSaveMs;
+  final DateTime completedAt;
+
+  const SaveDiagnosticsRecord({
+    required this.gestureLabel,
+    required this.draftSamples,
+    required this.totalSamplesAfterSave,
+    required this.trainedGestureCount,
+    required this.featureLength,
+    required this.loadRepositoryMs,
+    required this.samplePreparationMs,
+    required this.trainModelMs,
+    required this.writeRepositoryMs,
+    required this.totalSaveMs,
+    required this.completedAt,
   });
 }
 
@@ -334,6 +363,7 @@ class GestureRecognitionService {
   final BleGloveService _bleService = BleGloveService();
   final GestureFeatureExtractor _featureExtractor = GestureFeatureExtractor();
   final GestureStorageService _storageService = GestureStorageService();
+  final SessionStateService _sessionStateService = SessionStateService();
   final GestureTrainer _trainer = RandomForestGestureTrainer();
   final GloveCalibrationService _calibrationService = GloveCalibrationService();
   final AppSettingsService _settingsService = AppSettingsService();
@@ -352,6 +382,8 @@ class GestureRecognitionService {
   double? _latestLatencyMs;
   double? _latestInferenceTimeMs;
   final List<RecognitionMetricRecord> _recognitionHistory = [];
+  bool _isSavingDraft = false;
+  SaveDiagnosticsRecord? _lastSaveDiagnostics;
 
   Stream<GestureRecognitionState> get states => _stateController.stream;
   GestureRecognitionState get state => _state;
@@ -359,6 +391,8 @@ class GestureRecognitionService {
   double? get latestInferenceTimeMs => _latestInferenceTimeMs;
   List<RecognitionMetricRecord> get recognitionHistory =>
       List.unmodifiable(_recognitionHistory);
+  bool get isSavingDraft => _isSavingDraft;
+  SaveDiagnosticsRecord? get lastSaveDiagnostics => _lastSaveDiagnostics;
 
   Future<void> reloadRepository() async {
     await ensureInitialized();
@@ -371,6 +405,27 @@ class GestureRecognitionService {
     await reloadRepository();
   }
 
+  Future<void> toggleGestureEnabled(String gestureId, bool enabled) async {
+    await ensureInitialized();
+    final settings = _settingsService.settings;
+    final disabledGestureIds = settings.disabledGestureIds.toSet();
+    if (enabled) {
+      disabledGestureIds.remove(gestureId);
+    } else {
+      disabledGestureIds.add(gestureId);
+    }
+    await _settingsService.save(
+      settings.copyWith(disabledGestureIds: disabledGestureIds.toList()..sort()),
+    );
+    await _loadRepositoryIntoState();
+    _state = _state.copyWith(
+      statusMessage: enabled
+          ? 'Gesture enabled for inference.'
+          : 'Gesture disabled for inference.',
+    );
+    _emit();
+  }
+
   Future<void> ensureInitialized() async {
     if (_initialized) {
       _emit();
@@ -379,6 +434,7 @@ class GestureRecognitionService {
 
     _initialized = true;
     await _settingsService.ensureInitialized();
+    await _sessionStateService.ensureInitialized();
     await _loadRepositoryIntoState();
 
     await _bleService.ensureInitialized();
@@ -416,45 +472,6 @@ class GestureRecognitionService {
         spokenText: trimmedSpokenText,
         isDynamic: isDynamic,
         targetSamples: max(1, targetSamples),
-        capturedSamples: const [],
-      ),
-    );
-    _emit();
-  }
-
-  Future<void> startAdditionalSamplesDraft({
-    required String gestureId,
-    int additionalSamples = 5,
-  }) async {
-    await ensureInitialized();
-    if (!_isCalibrationReady()) {
-      _setStatus(
-        'Calibration must be completed for both gloves before training.',
-      );
-      return;
-    }
-
-    GestureDefinition? gesture;
-    for (final item in _state.gestures) {
-      if (item.id == gestureId) {
-        gesture = item;
-        break;
-      }
-    }
-    if (gesture == null) {
-      _setStatus('Gesture not found. Refresh the dictionary and try again.');
-      return;
-    }
-
-    _state = _state.copyWith(
-      statusMessage:
-          'Adding $additionalSamples more windows to "${gesture.label}".',
-      activeDraft: TrainingDraft(
-        gestureId: gesture.id,
-        label: gesture.label,
-        spokenText: gesture.spokenText,
-        isDynamic: gesture.isDynamic,
-        targetSamples: max(1, additionalSamples),
         capturedSamples: const [],
       ),
     );
@@ -572,6 +589,10 @@ class GestureRecognitionService {
   }
 
   Future<void> saveDraftAndRetrain() async {
+    if (_isSavingDraft) {
+      _setStatus('Save already in progress. Please wait.');
+      return;
+    }
     final draft = _state.activeDraft;
     if (draft == null) {
       _setStatus('Nothing to save yet.');
@@ -582,59 +603,91 @@ class GestureRecognitionService {
       return;
     }
 
-    final repository = await _storageService.loadRepository();
-    final compatibleExistingSamples = _compatibleSamples(repository.samples);
-    final retainedSamples = compatibleExistingSamples
-        .where((sample) => sample.gestureId != draft.gestureId)
-        .toList();
-    final existingGestureSamples = compatibleExistingSamples
-        .where((sample) => sample.gestureId == draft.gestureId)
-        .toList();
-    final addedSampleCount = draft.capturedSamples.length;
-    final totalSampleCount = existingGestureSamples.length + addedSampleCount;
-    final updatedSamples = [
-      ...retainedSamples,
-      ...existingGestureSamples,
-      ...draft.capturedSamples,
-    ];
-    final compatibleUpdatedSamples = _compatibleSamples(updatedSamples);
+    _isSavingDraft = true;
+    _lastSaveDiagnostics = null;
+    _state = _state.copyWith(
+      statusMessage: 'Saving "${draft.label}" and retraining model...',
+    );
+    _emit();
 
-    final updatedDefinitions =
-        repository.gestures
-            .where((gesture) => gesture.id != draft.gestureId)
-            .toList()
-          ..add(
-            GestureDefinition(
-              id: draft.gestureId,
-              label: draft.label,
-              spokenText: draft.spokenText,
-              isDynamic: draft.isDynamic,
-              sampleCount: totalSampleCount,
+    try {
+      final totalStopwatch = Stopwatch()..start();
+      final loadStopwatch = Stopwatch()..start();
+      final repository = await _storageService.loadRepository();
+      loadStopwatch.stop();
+
+      final samplePrepStopwatch = Stopwatch()..start();
+      final compatibleExistingSamples = _compatibleSamples(repository.samples);
+      final retainedSamples = compatibleExistingSamples
+          .where((sample) => sample.gestureId != draft.gestureId)
+          .toList();
+      final updatedSamples = [...retainedSamples, ...draft.capturedSamples];
+      final compatibleUpdatedSamples = _compatibleSamples(updatedSamples);
+
+      final updatedDefinitions =
+          repository.gestures
+              .where((gesture) => gesture.id != draft.gestureId)
+              .toList()
+            ..add(
+              GestureDefinition(
+                id: draft.gestureId,
+                label: draft.label,
+                spokenText: draft.spokenText,
+                isDynamic: draft.isDynamic,
+                sampleCount: draft.capturedSamples.length,
               updatedAt: DateTime.now(),
             ),
           );
+      samplePrepStopwatch.stop();
 
-    final model = compatibleUpdatedSamples.isEmpty
-        ? null
-        : _trainer.train(compatibleUpdatedSamples);
-    final updatedRepository = GestureRepositorySnapshot(
-      samples: compatibleUpdatedSamples,
-      gestures: updatedDefinitions,
-      model: model,
-    );
-    await _storageService.saveRepository(updatedRepository);
+      final trainStopwatch = Stopwatch()..start();
+      final model = _trainModelForCurrentSettings(compatibleUpdatedSamples);
+      trainStopwatch.stop();
+      final updatedRepository = GestureRepositorySnapshot(
+        samples: compatibleUpdatedSamples,
+        gestures: updatedDefinitions,
+        model: model,
+      );
 
-    _state = _state.copyWith(
-      statusMessage: existingGestureSamples.isEmpty
-          ? 'Saved "${draft.label}" with $totalSampleCount windows. Model retrained.'
-          : 'Added $addedSampleCount windows to "${draft.label}" ($totalSampleCount total). Model retrained.',
-      gestures: updatedDefinitions,
-      model: model,
-      clearDraft: true,
-      captureProgress: 0,
-      countdownValue: 0,
-    );
-    _emit();
+      final writeStopwatch = Stopwatch()..start();
+      await _storageService.saveRepository(updatedRepository);
+      writeStopwatch.stop();
+      totalStopwatch.stop();
+
+      _lastSaveDiagnostics = SaveDiagnosticsRecord(
+        gestureLabel: draft.label,
+        draftSamples: draft.capturedSamples.length,
+        totalSamplesAfterSave: compatibleUpdatedSamples.length,
+        trainedGestureCount: updatedDefinitions.length,
+        featureLength: compatibleUpdatedSamples.isEmpty
+            ? 0
+            : compatibleUpdatedSamples.first.featureVector.length,
+        loadRepositoryMs: loadStopwatch.elapsedMicroseconds / 1000.0,
+        samplePreparationMs: samplePrepStopwatch.elapsedMicroseconds / 1000.0,
+        trainModelMs: trainStopwatch.elapsedMicroseconds / 1000.0,
+        writeRepositoryMs: writeStopwatch.elapsedMicroseconds / 1000.0,
+        totalSaveMs: totalStopwatch.elapsedMicroseconds / 1000.0,
+        completedAt: DateTime.now(),
+      );
+
+      _state = _state.copyWith(
+        statusMessage:
+            'Saved "${draft.label}" with ${draft.capturedSamples.length} windows. Model retrained in ${_lastSaveDiagnostics!.totalSaveMs.toStringAsFixed(0)} ms.',
+        gestures: updatedDefinitions,
+        model: model,
+        clearDraft: true,
+        captureProgress: 0,
+        countdownValue: 0,
+      );
+      _emit();
+    } catch (e) {
+      _state = _state.copyWith(
+        statusMessage: 'Save failed: $e',
+      );
+      _emit();
+    } finally {
+      _isSavingDraft = false;
+    }
   }
 
   Future<void> deleteGesture(String gestureId) async {
@@ -647,9 +700,7 @@ class GestureRecognitionService {
         .toList();
 
     final compatibleRemainingSamples = _compatibleSamples(remainingSamples);
-    final model = compatibleRemainingSamples.isEmpty
-        ? null
-        : _trainer.train(compatibleRemainingSamples);
+    final model = _trainModelForCurrentSettings(compatibleRemainingSamples);
     final updatedRepository = GestureRepositorySnapshot(
       samples: compatibleRemainingSamples,
       gestures: remainingGestures,
@@ -711,27 +762,8 @@ class GestureRecognitionService {
         )
         .toList();
 
-    final model = repository.model == null
-        ? null
-        : GestureModelSnapshot(
-            trainerType: repository.model!.trainerType,
-            featureLength: repository.model!.featureLength,
-            decisionThreshold: repository.model!.decisionThreshold,
-            trainedAt: repository.model!.trainedAt,
-            profiles: repository.model!.profiles
-                .map(
-                  (profile) => profile.gestureId != gestureId
-                      ? profile
-                      : GestureModelProfile(
-                          gestureId: profile.gestureId,
-                          label: trimmedLabel,
-                          spokenText: trimmedSpokenText,
-                          isDynamic: profile.isDynamic,
-                        ),
-                )
-                .toList(),
-            trees: repository.model!.trees,
-          );
+    final compatibleUpdatedSamples = _compatibleSamples(updatedSamples);
+    final model = _trainModelForCurrentSettings(compatibleUpdatedSamples);
 
     final updatedRepository = GestureRepositorySnapshot(
       samples: updatedSamples,
@@ -784,9 +816,7 @@ class GestureRecognitionService {
   Future<void> _loadRepositoryIntoState() async {
     final repository = await _storageService.loadRepository();
     final compatibleSamples = _compatibleSamples(repository.samples);
-    final retrainedModel = compatibleSamples.isEmpty
-        ? null
-        : _trainer.train(compatibleSamples);
+    final retrainedModel = _trainModelForCurrentSettings(compatibleSamples);
 
     _lastPredictionAt = null;
     _lastCommittedGestureId = null;
@@ -797,14 +827,18 @@ class GestureRecognitionService {
     _recognitionHistory.clear();
     _inferenceFrames.clear();
 
+    final restoredDraft = _sessionStateService.snapshot.activeDraft;
+
     _state = _state.copyWith(
       isReady: true,
-      statusMessage: retrainedModel == null
+      statusMessage: restoredDraft != null
+          ? 'Restored unsaved training draft after reopening the app.'
+          : retrainedModel == null
           ? 'Ready. Connect gloves, calibrate, then collect training windows.'
           : 'Ready. ${repository.gestures.length} trained gestures loaded.',
       gestures: repository.gestures,
       model: retrainedModel,
-      clearDraft: true,
+      activeDraft: restoredDraft,
       clearPrediction: true,
       isPresentationActive: false,
       captureProgress: 0,
@@ -1142,6 +1176,19 @@ class GestureRecognitionService {
         .toList();
   }
 
+  GestureModelSnapshot? _trainModelForCurrentSettings(
+    List<GestureTrainingSample> compatibleSamples,
+  ) {
+    final disabledGestureIds = _settingsService.settings.disabledGestureIds.toSet();
+    final enabledSamples = compatibleSamples
+        .where((sample) => !disabledGestureIds.contains(sample.gestureId))
+        .toList();
+    if (enabledSamples.isEmpty) {
+      return null;
+    }
+    return _trainer.train(enabledSamples);
+  }
+
   GestureModelProfile? _profileForGesture(
     GestureModelSnapshot model,
     String gestureId,
@@ -1172,5 +1219,24 @@ class GestureRecognitionService {
     if (!_stateController.isClosed) {
       _stateController.add(_state);
     }
+    final activeDraft = _state.activeDraft;
+    final lightweightDraft = activeDraft == null
+        ? null
+        : TrainingDraft(
+            gestureId: activeDraft.gestureId,
+            label: activeDraft.label,
+            spokenText: activeDraft.spokenText,
+            isDynamic: activeDraft.isDynamic,
+            targetSamples: activeDraft.targetSamples,
+            capturedSamples: const [],
+          );
+    unawaited(
+      _sessionStateService.save(
+        _sessionStateService.snapshot.copyWith(
+          activeDraft: lightweightDraft,
+          clearActiveDraft: lightweightDraft == null,
+        ),
+      ),
+    );
   }
 }

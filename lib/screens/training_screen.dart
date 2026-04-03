@@ -6,6 +6,7 @@ import '../models/gesture_models.dart';
 import '../services/app_settings_service.dart';
 import '../services/ble_glove_service.dart';
 import '../services/gesture_recognition_service.dart';
+import '../services/session_state_service.dart';
 
 class TrainingScreen extends StatefulWidget {
   const TrainingScreen({super.key});
@@ -20,6 +21,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
   final BleGloveService _bleService = BleGloveService();
   final GestureRecognitionService _gestureService = GestureRecognitionService();
   final AppSettingsService _settingsService = AppSettingsService();
+  final SessionStateService _sessionStateService = SessionStateService();
 
   StreamSubscription<GestureRecognitionState>? _stateSub;
   StreamSubscription<AppSettings>? _settingsSub;
@@ -37,6 +39,19 @@ class _TrainingScreenState extends State<TrainingScreen> {
         setState(() {});
         _scheduleAutoCaptureIfNeeded(_gestureService.state);
       }
+    });
+    _sessionStateService.ensureInitialized().then((_) {
+      if (!mounted) {
+        return;
+      }
+      final session = _sessionStateService.snapshot;
+      setState(() {
+        _targetSamples = session.trainingTargetSamples;
+        _isDynamicGesture = session.trainingIsDynamic;
+      });
+      _labelController.text = session.trainingLabel;
+      _spokenTextController.text = session.trainingSpokenText;
+      _syncDraftFields(_gestureService.state.activeDraft);
     });
     _stateSub = _gestureService.states.listen((state) {
       if (mounted) {
@@ -59,6 +74,17 @@ class _TrainingScreenState extends State<TrainingScreen> {
     _labelController.dispose();
     _spokenTextController.dispose();
     super.dispose();
+  }
+
+  void _persistFormState() {
+    _sessionStateService.save(
+      _sessionStateService.snapshot.copyWith(
+        trainingLabel: _labelController.text,
+        trainingSpokenText: _spokenTextController.text,
+        trainingTargetSamples: _targetSamples,
+        trainingIsDynamic: _isDynamicGesture,
+      ),
+    );
   }
 
   void _scheduleAutoCaptureIfNeeded(GestureRecognitionState state) {
@@ -123,6 +149,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
         _isDynamicGesture = draft.isDynamic;
       });
     }
+    _persistFormState();
   }
 
   Future<void> _startDraft() async {
@@ -154,6 +181,8 @@ class _TrainingScreenState extends State<TrainingScreen> {
     final recognitionState = _gestureService.state;
     final settings = _settingsService.settings;
     final draft = recognitionState.activeDraft;
+    final isSavingDraft = _gestureService.isSavingDraft;
+    final lastSaveDiagnostics = _gestureService.lastSaveDiagnostics;
     final areBothConnected = _bleService.snapshot.areBothConnected;
     final draftProgress = draft == null || draft.targetSamples == 0
         ? 0.0
@@ -164,6 +193,9 @@ class _TrainingScreenState extends State<TrainingScreen> {
             0,
             draft.targetSamples,
           );
+    final sampleOptions = <int>{5, 10, 15, 20, 30, 40, 50, _targetSamples}
+      ..removeWhere((value) => value <= 0);
+    final sortedSampleOptions = sampleOptions.toList()..sort();
 
     return SafeArea(
       child: SingleChildScrollView(
@@ -198,6 +230,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
             const SizedBox(height: 20),
             TextField(
               controller: _labelController,
+              onChanged: (_) => _persistFormState(),
               decoration: InputDecoration(
                 hintText: 'Gesture label, e.g. Magandang Umaga',
                 labelText: 'Gesture Label',
@@ -209,6 +242,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
             const SizedBox(height: 16),
             TextField(
               controller: _spokenTextController,
+              onChanged: (_) => _persistFormState(),
               decoration: InputDecoration(
                 hintText: 'Speech output, e.g. Magandang umaga po',
                 labelText: 'Spoken Text',
@@ -231,6 +265,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
                       setState(() {
                         _isDynamicGesture = value;
                       });
+                      _persistFormState();
                     }
                   : null,
             ),
@@ -257,7 +292,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
                 const SizedBox(width: 12),
                 DropdownButton<int>(
                   value: _targetSamples,
-                  items: const [5, 10, 15, 20, 30, 40, 50]
+                  items: sortedSampleOptions
                       .map(
                         (count) => DropdownMenuItem<int>(
                           value: count,
@@ -271,6 +306,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
                           setState(() {
                             _targetSamples = value;
                           });
+                          _persistFormState();
                         }
                       : null,
                 ),
@@ -345,12 +381,14 @@ class _TrainingScreenState extends State<TrainingScreen> {
             ),
             const SizedBox(height: 20),
             ElevatedButton(
-              onPressed: draft == null ? _startDraft : null,
+              onPressed: draft == null && !isSavingDraft ? _startDraft : null,
               child: const Text('Create Training Draft'),
             ),
             const SizedBox(height: 12),
             ElevatedButton(
-              onPressed: draft != null && !recognitionState.isRecording
+              onPressed: draft != null &&
+                      !recognitionState.isRecording &&
+                      !isSavingDraft
                   ? () async {
                       await _gestureService.captureTrainingSample(
                         countdown: Duration.zero,
@@ -367,16 +405,22 @@ class _TrainingScreenState extends State<TrainingScreen> {
             ),
             const SizedBox(height: 12),
             ElevatedButton(
-              onPressed: draft != null && draft.capturedSamples.isNotEmpty
+              onPressed: draft != null &&
+                      draft.capturedSamples.isNotEmpty &&
+                      !isSavingDraft
                   ? () async {
                       await _gestureService.saveDraftAndRetrain();
                     }
                   : null,
-              child: const Text('Save Gesture and Retrain Model'),
+              child: Text(
+                isSavingDraft
+                    ? 'Saving Gesture Model...'
+                    : 'Save Gesture and Retrain Model',
+              ),
             ),
             const SizedBox(height: 12),
             OutlinedButton(
-              onPressed: draft != null
+              onPressed: draft != null && !isSavingDraft
                   ? () async {
                       await _gestureService.discardDraft();
                     }
@@ -408,6 +452,29 @@ class _TrainingScreenState extends State<TrainingScreen> {
                           ? 'No trained model saved yet.'
                           : 'Current model: ${recognitionState.model!.trainerType} with ${recognitionState.gestures.length} gestures.',
                     ),
+                    if (lastSaveDiagnostics != null) ...[
+                      const SizedBox(height: 12),
+                      const Text(
+                        'Last Save Diagnostics',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Gesture: ${lastSaveDiagnostics.gestureLabel} | Draft samples: ${lastSaveDiagnostics.draftSamples} | Total samples: ${lastSaveDiagnostics.totalSamplesAfterSave}',
+                      ),
+                      Text(
+                        'Gestures: ${lastSaveDiagnostics.trainedGestureCount} | Feature length: ${lastSaveDiagnostics.featureLength}',
+                      ),
+                      Text(
+                        'Load: ${lastSaveDiagnostics.loadRepositoryMs.toStringAsFixed(1)} ms | Prep: ${lastSaveDiagnostics.samplePreparationMs.toStringAsFixed(1)} ms',
+                      ),
+                      Text(
+                        'Train: ${lastSaveDiagnostics.trainModelMs.toStringAsFixed(1)} ms | Write: ${lastSaveDiagnostics.writeRepositoryMs.toStringAsFixed(1)} ms',
+                      ),
+                      Text(
+                        'Total: ${lastSaveDiagnostics.totalSaveMs.toStringAsFixed(1)} ms',
+                      ),
+                    ],
                   ],
                 ),
               ),

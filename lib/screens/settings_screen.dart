@@ -137,6 +137,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             children: [
               _SliderTile(
                 label: 'Confidence Threshold',
+                helperText:
+                    'Higher values require stronger model confidence before a gesture is accepted.',
                 value: settings.confidenceThreshold,
                 min: 0.40,
                 max: 0.95,
@@ -148,6 +150,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               _SliderTile(
                 label: 'Dynamic Motion Threshold',
+                helperText:
+                    'Higher values require more obvious movement before a gesture is treated as dynamic.',
                 value: settings.dynamicMotionThreshold,
                 min: 0.4,
                 max: 4.0,
@@ -159,6 +163,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               _SliderTile(
                 label: 'Presentation Gyro Threshold',
+                helperText:
+                    'Controls how much wrist rotation is needed before the app treats the hands as actively signing.',
                 value: settings.presentationGyroThreshold,
                 min: 0.02,
                 max: 1.0,
@@ -174,6 +180,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               _SliderTile(
                 label: 'Presentation Accel Threshold',
+                helperText:
+                    'Controls how much hand acceleration is needed before motion is considered intentional.',
                 value: settings.presentationAccelerationThreshold,
                 min: 0.02,
                 max: 1.0,
@@ -188,6 +196,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               _SliderTile(
                 label: 'Presentation Flex Threshold',
+                helperText:
+                    'Controls how much finger change is needed before the hand is treated as presenting a sign.',
                 value: settings.presentationFlexThreshold,
                 min: 1.0,
                 max: 20.0,
@@ -208,6 +218,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             children: [
               _SliderTile(
                 label: 'Flex Smoothing Alpha',
+                helperText:
+                    'Higher values react faster but show more noise. Lower values are steadier but slower.',
                 value: settings.flexSmoothingAlpha,
                 min: 0.10,
                 max: 0.95,
@@ -219,6 +231,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               _SliderTile(
                 label: 'IMU Smoothing Alpha',
+                helperText:
+                    'Higher values respond faster to motion sensors. Lower values smooth sudden spikes more.',
                 value: settings.imuSmoothingAlpha,
                 min: 0.10,
                 max: 0.95,
@@ -230,6 +244,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               _SliderTile(
                 label: 'Flex Deadband',
+                helperText:
+                    'Small changes below this amount are ignored to reduce sensor jitter.',
                 value: settings.flexDeadband,
                 min: 0.0,
                 max: 2.0,
@@ -241,6 +257,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               _SliderTile(
                 label: 'IMU Deadband',
+                helperText:
+                    'Small motion fluctuations below this amount are ignored to reduce shaking noise.',
                 value: settings.imuDeadband,
                 min: 0.0,
                 max: 0.08,
@@ -248,6 +266,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 valueText: settings.imuDeadband.toStringAsFixed(3),
                 onChanged: (value) async {
                   await _save(settings.copyWith(imuDeadband: value));
+                },
+              ),
+              _SliderTile(
+                label: 'Thumb Min Flex Span',
+                helperText:
+                    'Lowers or raises the minimum thumb calibration span used for short thumb flex sensors.',
+                value: settings.thumbFlexMinimumSpan,
+                min: 30.0,
+                max: 140.0,
+                divisions: 22,
+                valueText: settings.thumbFlexMinimumSpan.toStringAsFixed(0),
+                onChanged: (value) async {
+                  await _save(settings.copyWith(thumbFlexMinimumSpan: value));
                 },
               ),
             ],
@@ -391,6 +422,7 @@ class _Section extends StatelessWidget {
 
 class _SliderTile extends StatelessWidget {
   final String label;
+  final String? helperText;
   final double value;
   final double min;
   final double max;
@@ -400,6 +432,7 @@ class _SliderTile extends StatelessWidget {
 
   const _SliderTile({
     required this.label,
+    this.helperText,
     required this.value,
     required this.min,
     required this.max,
@@ -413,13 +446,25 @@ class _SliderTile extends StatelessWidget {
     return ListTile(
       contentPadding: EdgeInsets.zero,
       title: Text(label),
-      subtitle: Slider(
-        value: value.clamp(min, max),
-        min: min,
-        max: max,
-        divisions: divisions,
-        label: valueText,
-        onChanged: onChanged,
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (helperText != null) ...[
+            Text(
+              helperText!,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 6),
+          ],
+          Slider(
+            value: value.clamp(min, max),
+            min: min,
+            max: max,
+            divisions: divisions,
+            label: valueText,
+            onChanged: onChanged,
+          ),
+        ],
       ),
       trailing: SizedBox(
         width: 52,

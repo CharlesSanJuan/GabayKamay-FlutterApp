@@ -19,6 +19,8 @@ class AppSettings {
   final bool muteTranslationWhileTraining;
   final bool ttsEnabled;
   final bool showThesisMetrics;
+  final double thumbFlexMinimumSpan;
+  final List<String> disabledGestureIds;
 
   const AppSettings({
     required this.confidenceThreshold,
@@ -36,6 +38,8 @@ class AppSettings {
     required this.muteTranslationWhileTraining,
     required this.ttsEnabled,
     required this.showThesisMetrics,
+    required this.thumbFlexMinimumSpan,
+    required this.disabledGestureIds,
   });
 
   factory AppSettings.defaults() {
@@ -55,6 +59,8 @@ class AppSettings {
       muteTranslationWhileTraining: true,
       ttsEnabled: true,
       showThesisMetrics: false,
+      thumbFlexMinimumSpan: 70.0,
+      disabledGestureIds: [],
     );
   }
 
@@ -74,6 +80,8 @@ class AppSettings {
     bool? muteTranslationWhileTraining,
     bool? ttsEnabled,
     bool? showThesisMetrics,
+    double? thumbFlexMinimumSpan,
+    List<String>? disabledGestureIds,
   }) {
     return AppSettings(
       confidenceThreshold: confidenceThreshold ?? this.confidenceThreshold,
@@ -100,6 +108,8 @@ class AppSettings {
           muteTranslationWhileTraining ?? this.muteTranslationWhileTraining,
       ttsEnabled: ttsEnabled ?? this.ttsEnabled,
       showThesisMetrics: showThesisMetrics ?? this.showThesisMetrics,
+      thumbFlexMinimumSpan: thumbFlexMinimumSpan ?? this.thumbFlexMinimumSpan,
+      disabledGestureIds: disabledGestureIds ?? this.disabledGestureIds,
     );
   }
 
@@ -119,6 +129,8 @@ class AppSettings {
     'muteTranslationWhileTraining': muteTranslationWhileTraining,
     'ttsEnabled': ttsEnabled,
     'showThesisMetrics': showThesisMetrics,
+    'thumbFlexMinimumSpan': thumbFlexMinimumSpan,
+    'disabledGestureIds': disabledGestureIds,
   };
 
   factory AppSettings.fromJson(Map<String, dynamic> json) {
@@ -164,6 +176,13 @@ class AppSettings {
       ttsEnabled: json['ttsEnabled'] as bool? ?? defaults.ttsEnabled,
       showThesisMetrics:
           json['showThesisMetrics'] as bool? ?? defaults.showThesisMetrics,
+      thumbFlexMinimumSpan:
+          (json['thumbFlexMinimumSpan'] as num?)?.toDouble() ??
+          defaults.thumbFlexMinimumSpan,
+      disabledGestureIds:
+          (json['disabledGestureIds'] as List<dynamic>? ?? const [])
+              .map((item) => item as String)
+              .toList(),
     );
   }
 }

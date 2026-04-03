@@ -1,4 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
+
+import 'package:shared_preferences/shared_preferences.dart';
 
 class GloveCalibration {
   static const double minimumReliableFlexSpan = 140.0;
@@ -51,20 +54,58 @@ class GloveCalibration {
   double gyroDpsY(double raw) => gyroDps(raw, gyBias);
   double gyroDpsZ(double raw) => gyroDps(raw, gzBias);
 
-  double mapToPercent(int fingerIndex, double rawValue) {
+  double mapToPercent(
+    int fingerIndex,
+    double rawValue, {
+    double? thumbMinimumSpan,
+  }) {
     if (fingerIndex < 0 || fingerIndex >= 5) return 0.0;
     final minVal = minRaw[fingerIndex];
     final maxVal = maxRaw[fingerIndex];
     if (minVal >= maxVal) return 0.0;
-    final effectiveSpan = (maxVal - minVal) < minimumReliableFlexSpan
-        ? minimumReliableFlexSpan
+    final minimumSpan = fingerIndex == 0
+        ? (thumbMinimumSpan ?? minimumReliableFlexSpan)
+        : minimumReliableFlexSpan;
+    final effectiveSpan = (maxVal - minVal) < minimumSpan
+        ? minimumSpan
         : (maxVal - minVal);
     final normalized = ((rawValue - minVal) / effectiveSpan) * 100.0;
     return normalized.clamp(0.0, 100.0);
   }
+
+  Map<String, dynamic> toJson() => {
+        'minRaw': minRaw,
+        'maxRaw': maxRaw,
+        'axBias': axBias,
+        'ayBias': ayBias,
+        'azBias': azBias,
+        'gxBias': gxBias,
+        'gyBias': gyBias,
+        'gzBias': gzBias,
+      };
+
+  void restoreFromJson(Map<String, dynamic> json) {
+    final minValues = (json['minRaw'] as List<dynamic>? ?? const [])
+        .map((item) => (item as num).toDouble())
+        .toList();
+    final maxValues = (json['maxRaw'] as List<dynamic>? ?? const [])
+        .map((item) => (item as num).toDouble())
+        .toList();
+    for (var i = 0; i < 5; i++) {
+      minRaw[i] = i < minValues.length ? minValues[i] : double.maxFinite;
+      maxRaw[i] = i < maxValues.length ? maxValues[i] : double.minPositive;
+    }
+    axBias = (json['axBias'] as num?)?.toDouble() ?? 0.0;
+    ayBias = (json['ayBias'] as num?)?.toDouble() ?? 0.0;
+    azBias = (json['azBias'] as num?)?.toDouble() ?? 0.0;
+    gxBias = (json['gxBias'] as num?)?.toDouble() ?? 0.0;
+    gyBias = (json['gyBias'] as num?)?.toDouble() ?? 0.0;
+    gzBias = (json['gzBias'] as num?)?.toDouble() ?? 0.0;
+  }
 }
 
 class GloveCalibrationService {
+  static const _storageKey = 'glove_calibration_v1';
   static final GloveCalibrationService _instance = GloveCalibrationService._internal();
   factory GloveCalibrationService() => _instance;
   GloveCalibrationService._internal();
@@ -75,6 +116,7 @@ class GloveCalibrationService {
   // Stream for real-time updates
   final _updateController = StreamController<void>.broadcast();
   Stream<void> get updates => _updateController.stream;
+  bool _initialized = false;
 
   Map<String, double> leftRaw = {
     'flex_thumb_raw': 0,
@@ -103,6 +145,38 @@ class GloveCalibrationService {
     'gy_raw': 0,
     'gz_raw': 0,
   };
+
+  Future<void> ensureInitialized() async {
+    if (_initialized) {
+      return;
+    }
+    _initialized = true;
+
+    final prefs = await SharedPreferences.getInstance();
+    final encoded = prefs.getString(_storageKey);
+    if (encoded == null || encoded.isEmpty) {
+      return;
+    }
+
+    try {
+      final decoded = jsonDecode(encoded) as Map<String, dynamic>;
+      left.restoreFromJson(decoded['left'] as Map<String, dynamic>? ?? const {});
+      right.restoreFromJson(decoded['right'] as Map<String, dynamic>? ?? const {});
+      _updateController.add(null);
+    } catch (_) {}
+  }
+
+  Future<void> save() async {
+    await ensureInitialized();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _storageKey,
+      jsonEncode({
+        'left': left.toJson(),
+        'right': right.toJson(),
+      }),
+    );
+  }
 
   void updateLatest(String gloveName, Map<String, double> parsed) {
     if (gloveName == 'GLOVE_LEFT') {
@@ -137,6 +211,8 @@ class GloveCalibrationService {
     };
 
     rightRaw = Map<String, double>.from(leftRaw);
+    unawaited(save());
+    _updateController.add(null);
   }
 
   GloveCalibration getCalibration(String gloveName) {

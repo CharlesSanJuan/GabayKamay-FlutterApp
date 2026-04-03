@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../services/app_settings_service.dart';
 import '../services/ble_glove_service.dart';
 import '../services/glove_calibration_service.dart';
 
@@ -28,6 +29,7 @@ class _CalibrationScreenState extends State<CalibrationScreen>
     with TickerProviderStateMixin {
   final GloveCalibrationService _calibration = GloveCalibrationService();
   final BleGloveService _bleService = BleGloveService();
+  final AppSettingsService _settingsService = AppSettingsService();
   final List<_CalibrationStage> _stages = const [
     _CalibrationStage(
       title: 'Open Hands at Waist Level',
@@ -65,6 +67,7 @@ class _CalibrationScreenState extends State<CalibrationScreen>
   @override
   void initState() {
     super.initState();
+    _initializeCalibrationState();
 
     pulseController = AnimationController(
       vsync: this,
@@ -83,6 +86,24 @@ class _CalibrationScreenState extends State<CalibrationScreen>
     completeAnimation = Tween<double>(begin: 1.0, end: 1.4).animate(
       CurvedAnimation(parent: completeController, curve: Curves.easeOutBack),
     );
+  }
+
+  Future<void> _initializeCalibrationState() async {
+    await _settingsService.ensureInitialized();
+    await _calibration.ensureInitialized();
+    if (!mounted) {
+      return;
+    }
+    final hasSavedCalibration =
+        _calibration.left.isComplete && _calibration.right.isComplete;
+    setState(() {
+      _isComplete = hasSavedCalibration;
+      _statusText = hasSavedCalibration
+          ? 'Saved calibration loaded.'
+          : 'Connect both gloves to begin calibration.';
+      _progress = hasSavedCalibration ? 1.0 : 0.0;
+      _captureProgress = hasSavedCalibration ? 1.0 : 0.0;
+    });
   }
 
   @override
@@ -151,6 +172,7 @@ class _CalibrationScreenState extends State<CalibrationScreen>
         _captureProgress = 1.0;
         _statusText = 'Calibration complete.';
       });
+      await _calibration.save();
       await completeController.forward();
     } catch (e) {
       setState(() {
@@ -304,7 +326,13 @@ class _CalibrationScreenState extends State<CalibrationScreen>
     if (!calibration.isComplete) {
       return rawValue;
     }
-    return calibration.mapToPercent(idx, rawValue);
+    return calibration.mapToPercent(
+      idx,
+      rawValue,
+      thumbMinimumSpan: idx == 0
+          ? _settingsService.settings.thumbFlexMinimumSpan
+          : null,
+    );
   }
 
   Widget _buildHands() {

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../models/gesture_models.dart';
+import '../services/app_settings_service.dart';
 import '../services/gesture_recognition_service.dart';
 
 class DictionaryScreen extends StatefulWidget {
@@ -14,13 +15,21 @@ class DictionaryScreen extends StatefulWidget {
 
 class _DictionaryScreenState extends State<DictionaryScreen> {
   final GestureRecognitionService _gestureService = GestureRecognitionService();
+  final AppSettingsService _settingsService = AppSettingsService();
   StreamSubscription<GestureRecognitionState>? _stateSub;
+  StreamSubscription<AppSettings>? _settingsSub;
 
   @override
   void initState() {
     super.initState();
     _gestureService.ensureInitialized();
+    _settingsService.ensureInitialized();
     _stateSub = _gestureService.states.listen((_) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
+    _settingsSub = _settingsService.changes.listen((_) {
       if (mounted) {
         setState(() {});
       }
@@ -30,6 +39,7 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
   @override
   void dispose() {
     _stateSub?.cancel();
+    _settingsSub?.cancel();
     super.dispose();
   }
 
@@ -120,62 +130,10 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
     spokenController.dispose();
   }
 
-  Future<void> _addSamplesToGesture(GestureDefinition gesture) async {
-    final samplesController = TextEditingController(text: '5');
-    final additionalSamples =
-        await showDialog<int>(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text('Add More Samples'),
-            content: TextField(
-              controller: samplesController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'Additional Windows',
-                hintText: 'Enter number of new samples',
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Cancel'),
-              ),
-              TextButton(
-                onPressed: () {
-                  final parsed = int.tryParse(samplesController.text.trim());
-                  Navigator.pop(context, parsed);
-                },
-                child: const Text('Continue'),
-              ),
-            ],
-          ),
-        ) ??
-        0;
-    samplesController.dispose();
-
-    if (additionalSamples <= 0) {
-      return;
-    }
-
-    await _gestureService.startAdditionalSamplesDraft(
-      gestureId: gesture.id,
-      additionalSamples: additionalSamples,
-    );
-    if (!mounted) {
-      return;
-    }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Opened "${gesture.label}" for more training. Switch to the Training tab to capture $additionalSamples new windows.',
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final state = _gestureService.state;
+    final disabledGestureIds = _settingsService.settings.disabledGestureIds.toSet();
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -219,19 +177,18 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
                 subtitle: Text(
-                  'Windows: ${gesture.sampleCount}\nSpeaks: ${gesture.spokenText}',
+                  'Windows: ${gesture.sampleCount}\nSpeaks: ${gesture.spokenText}\nStatus: ${disabledGestureIds.contains(gesture.id) ? "Disabled" : "Enabled"}',
                 ),
                 isThreeLine: true,
+                leading: Switch(
+                  value: !disabledGestureIds.contains(gesture.id),
+                  onChanged: (value) async {
+                    await _gestureService.toggleGestureEnabled(gesture.id, value);
+                  },
+                ),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    IconButton(
-                      icon: const Icon(Icons.library_add_outlined),
-                      tooltip: 'Add More Samples',
-                      onPressed: () async {
-                        await _addSamplesToGesture(gesture);
-                      },
-                    ),
                     IconButton(
                       icon: const Icon(Icons.edit_outlined),
                       tooltip: 'Edit Gesture',

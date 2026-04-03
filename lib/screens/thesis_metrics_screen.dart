@@ -56,6 +56,7 @@ class _ThesisMetricsScreenState extends State<ThesisMetricsScreen> {
         final latestLatencyMs = _gestureService.latestLatencyMs;
         final latestInferenceTimeMs = _gestureService.latestInferenceTimeMs;
         final recognitionHistory = _gestureService.recognitionHistory;
+        final saveDiagnostics = _gestureService.lastSaveDiagnostics;
         final uptime = bleState.bothConnectedSince == null
             ? 'Not connected'
             : _formatDuration(
@@ -191,6 +192,61 @@ class _ThesisMetricsScreenState extends State<ThesisMetricsScreen> {
                     : [
                         for (final record in recognitionHistory)
                           _RecognitionHistoryTile(record: record),
+                      ],
+              ),
+              const SizedBox(height: 12),
+              _MetricSection(
+                title: 'Training Save Diagnostics',
+                children: saveDiagnostics == null
+                    ? const [
+                        Text('No training save diagnostics recorded yet.'),
+                      ]
+                    : [
+                        _MetricRow(
+                          label: 'Gesture',
+                          value: saveDiagnostics.gestureLabel,
+                        ),
+                        _MetricRow(
+                          label: 'Draft samples',
+                          value: saveDiagnostics.draftSamples.toString(),
+                        ),
+                        _MetricRow(
+                          label: 'Total samples',
+                          value: saveDiagnostics.totalSamplesAfterSave.toString(),
+                        ),
+                        _MetricRow(
+                          label: 'Trained gestures',
+                          value: saveDiagnostics.trainedGestureCount.toString(),
+                        ),
+                        _MetricRow(
+                          label: 'Feature length',
+                          value: saveDiagnostics.featureLength.toString(),
+                        ),
+                        _MetricRow(
+                          label: 'Load repository',
+                          value:
+                              '${saveDiagnostics.loadRepositoryMs.toStringAsFixed(1)} ms',
+                        ),
+                        _MetricRow(
+                          label: 'Sample preparation',
+                          value:
+                              '${saveDiagnostics.samplePreparationMs.toStringAsFixed(1)} ms',
+                        ),
+                        _MetricRow(
+                          label: 'Train model',
+                          value:
+                              '${saveDiagnostics.trainModelMs.toStringAsFixed(1)} ms',
+                        ),
+                        _MetricRow(
+                          label: 'Write repository',
+                          value:
+                              '${saveDiagnostics.writeRepositoryMs.toStringAsFixed(1)} ms',
+                        ),
+                        _MetricRow(
+                          label: 'Total save',
+                          value:
+                              '${saveDiagnostics.totalSaveMs.toStringAsFixed(1)} ms',
+                        ),
                       ],
               ),
               const SizedBox(height: 12),
