@@ -1,5 +1,7 @@
 import 'dart:math';
 
+import '../models/gesture_models.dart';
+
 class GestureFeatureExtractor {
   static const List<String> _orderedKeys = [
     'flex_thumb',
@@ -23,6 +25,8 @@ class GestureFeatureExtractor {
   static const int _accelStart = 5;
   static const int _gyroStart = 8;
   static const int _orientationStart = 11;
+  static const int _leftHandOffset = 0;
+  static const int _rightHandOffset = _gloveStride;
 
   int get rawFeatureCount => _orderedKeys.length * 2;
   int get aggregatedFeatureCount => rawFeatureCount * 12;
@@ -35,6 +39,29 @@ class GestureFeatureExtractor {
       ..._orderedKeys.map((key) => left[key] ?? 0.0),
       ..._orderedKeys.map((key) => right[key] ?? 0.0),
     ];
+  }
+
+  List<List<double>> applyHandUsageMask(
+    List<List<double>> frames, {
+    required GestureHandUsage handUsage,
+  }) {
+    if (frames.isEmpty || handUsage == GestureHandUsage.bothHands) {
+      return frames.map((frame) => List<double>.from(frame)).toList();
+    }
+
+    return frames.map((frame) {
+      final masked = List<double>.from(frame);
+      if (handUsage == GestureHandUsage.leftOnly) {
+        for (var i = _rightHandOffset; i < _rightHandOffset + _gloveStride; i++) {
+          masked[i] = 0.0;
+        }
+      } else if (handUsage == GestureHandUsage.rightOnly) {
+        for (var i = _leftHandOffset; i < _leftHandOffset + _gloveStride; i++) {
+          masked[i] = 0.0;
+        }
+      }
+      return masked;
+    }).toList();
   }
 
   List<double> aggregateWindow(List<List<double>> frames) {
@@ -304,5 +331,74 @@ class GestureFeatureExtractor {
     required double threshold,
   }) {
     return estimateDynamicMotionScore(frames) >= threshold;
+  }
+
+  double estimateHandActivityScore(
+    List<List<double>> frames, {
+    required GestureHandUsage hand,
+  }) {
+    if (frames.length < 3) {
+      return 0.0;
+    }
+
+    final aggregated = aggregateWindow(frames);
+    if (aggregated.length != aggregatedFeatureCount) {
+      return 0.0;
+    }
+
+    final offset = hand == GestureHandUsage.rightOnly
+        ? _rightHandOffset
+        : _leftHandOffset;
+    final meansOffset = 0;
+    final rangesOffset = rawFeatureCount * 3;
+    final stdOffset = rawFeatureCount * 7;
+    final absDeltaOffset = rawFeatureCount * 8;
+
+    var score = 0.0;
+    for (var i = 0; i < _flexCount; i++) {
+      score += aggregated[meansOffset + offset + i].abs() * 0.08;
+      score += aggregated[rangesOffset + offset + i].abs() * 1.8;
+    }
+    for (var i = 0; i < 3; i++) {
+      score += aggregated[stdOffset + offset + _accelStart + i].abs() * 1.8;
+      score += aggregated[absDeltaOffset + offset + _gyroStart + i].abs() * 2.8;
+      score += aggregated[meansOffset + offset + _orientationStart + i].abs() * 0.04;
+    }
+    return score;
+  }
+
+  GestureHandUsage inferDominantHandUsage(
+    List<List<double>> frames, {
+    double activeThreshold = 2.2,
+    double dominanceRatio = 1.45,
+  }) {
+    final leftScore = estimateHandActivityScore(
+      frames,
+      hand: GestureHandUsage.leftOnly,
+    );
+    final rightScore = estimateHandActivityScore(
+      frames,
+      hand: GestureHandUsage.rightOnly,
+    );
+
+    final leftActive = leftScore >= activeThreshold;
+    final rightActive = rightScore >= activeThreshold;
+
+    if (leftActive && rightActive) {
+      if (leftScore >= rightScore * dominanceRatio) {
+        return GestureHandUsage.leftOnly;
+      }
+      if (rightScore >= leftScore * dominanceRatio) {
+        return GestureHandUsage.rightOnly;
+      }
+      return GestureHandUsage.bothHands;
+    }
+    if (leftActive) {
+      return GestureHandUsage.leftOnly;
+    }
+    if (rightActive) {
+      return GestureHandUsage.rightOnly;
+    }
+    return GestureHandUsage.bothHands;
   }
 }

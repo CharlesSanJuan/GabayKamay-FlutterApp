@@ -27,6 +27,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
   StreamSubscription<AppSettings>? _settingsSub;
   int _targetSamples = 10;
   bool _isDynamicGesture = false;
+  GestureHandUsage _handUsage = GestureHandUsage.bothHands;
   String? _autoCaptureDraftId;
   int? _autoCaptureCapturedCount;
 
@@ -48,6 +49,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
       setState(() {
         _targetSamples = session.trainingTargetSamples;
         _isDynamicGesture = session.trainingIsDynamic;
+        _handUsage = session.trainingHandUsage;
       });
       _labelController.text = session.trainingLabel;
       _spokenTextController.text = session.trainingSpokenText;
@@ -83,6 +85,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
         trainingSpokenText: _spokenTextController.text,
         trainingTargetSamples: _targetSamples,
         trainingIsDynamic: _isDynamicGesture,
+        trainingHandUsage: _handUsage,
       ),
     );
   }
@@ -143,10 +146,12 @@ class _TrainingScreenState extends State<TrainingScreen> {
       _spokenTextController.text = draft.spokenText;
     }
     if (_targetSamples != draft.targetSamples ||
-        _isDynamicGesture != draft.isDynamic) {
+        _isDynamicGesture != draft.isDynamic ||
+        _handUsage != draft.handUsage) {
       setState(() {
         _targetSamples = draft.targetSamples;
         _isDynamicGesture = draft.isDynamic;
+        _handUsage = draft.handUsage;
       });
     }
     _persistFormState();
@@ -172,6 +177,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
       label: label,
       spokenText: _spokenTextController.text.trim(),
       isDynamic: _isDynamicGesture,
+      handUsage: _handUsage,
       targetSamples: _targetSamples,
     );
   }
@@ -284,6 +290,33 @@ class _TrainingScreenState extends State<TrainingScreen> {
                 );
                 _scheduleAutoCaptureIfNeeded(_gestureService.state);
               },
+            ),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<GestureHandUsage>(
+              initialValue: _handUsage,
+              decoration: InputDecoration(
+                labelText: 'Hand Usage',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+              ),
+              items: GestureHandUsage.values
+                  .map(
+                    (usage) => DropdownMenuItem<GestureHandUsage>(
+                      value: usage,
+                      child: Text(usage.displayLabel),
+                    ),
+                  )
+                  .toList(),
+              onChanged: draft == null
+                  ? (value) {
+                      if (value == null) return;
+                      setState(() {
+                        _handUsage = value;
+                      });
+                      _persistFormState();
+                    }
+                  : null,
             ),
             const SizedBox(height: 8),
             Row(
@@ -444,7 +477,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
                     Text(
                       draft == null
                           ? 'No active draft'
-                          : 'Captured ${draft.capturedCount}/${draft.targetSamples} windows for "${draft.label}" (${draft.isDynamic ? "movement" : "static"}).',
+                          : 'Captured ${draft.capturedCount}/${draft.targetSamples} windows for "${draft.label}" (${draft.isDynamic ? "movement" : "static"}, ${draft.handUsage.displayLabel.toLowerCase()}).',
                     ),
                     const SizedBox(height: 8),
                     Text(

@@ -1,10 +1,37 @@
 import 'dart:convert';
 
+enum GestureHandUsage {
+  leftOnly,
+  rightOnly,
+  bothHands;
+
+  String get storageValue => switch (this) {
+    GestureHandUsage.leftOnly => 'left_only',
+    GestureHandUsage.rightOnly => 'right_only',
+    GestureHandUsage.bothHands => 'both_hands',
+  };
+
+  String get displayLabel => switch (this) {
+    GestureHandUsage.leftOnly => 'Left hand only',
+    GestureHandUsage.rightOnly => 'Right hand only',
+    GestureHandUsage.bothHands => 'Both hands',
+  };
+
+  static GestureHandUsage fromStorageValue(String? value) {
+    return switch (value) {
+      'left_only' => GestureHandUsage.leftOnly,
+      'right_only' => GestureHandUsage.rightOnly,
+      _ => GestureHandUsage.bothHands,
+    };
+  }
+}
+
 class GestureTrainingSample {
   final String gestureId;
   final String label;
   final String spokenText;
   final bool isDynamic;
+  final GestureHandUsage handUsage;
   final List<double> featureVector;
   final DateTime createdAt;
 
@@ -13,6 +40,7 @@ class GestureTrainingSample {
     required this.label,
     required this.spokenText,
     required this.isDynamic,
+    required this.handUsage,
     required this.featureVector,
     required this.createdAt,
   });
@@ -22,6 +50,7 @@ class GestureTrainingSample {
         'label': label,
         'spokenText': spokenText,
         'isDynamic': isDynamic,
+        'handUsage': handUsage.storageValue,
         'featureVector': featureVector,
         'createdAt': createdAt.toIso8601String(),
       };
@@ -32,6 +61,9 @@ class GestureTrainingSample {
       label: json['label'] as String,
       spokenText: json['spokenText'] as String,
       isDynamic: json['isDynamic'] as bool? ?? false,
+      handUsage: GestureHandUsage.fromStorageValue(
+        json['handUsage'] as String?,
+      ),
       featureVector: (json['featureVector'] as List<dynamic>)
           .map((value) => (value as num).toDouble())
           .toList(),
@@ -45,6 +77,7 @@ class GestureDefinition {
   final String label;
   final String spokenText;
   final bool isDynamic;
+  final GestureHandUsage handUsage;
   final int sampleCount;
   final DateTime updatedAt;
 
@@ -53,6 +86,7 @@ class GestureDefinition {
     required this.label,
     required this.spokenText,
     required this.isDynamic,
+    required this.handUsage,
     required this.sampleCount,
     required this.updatedAt,
   });
@@ -62,6 +96,7 @@ class GestureDefinition {
         'label': label,
         'spokenText': spokenText,
         'isDynamic': isDynamic,
+        'handUsage': handUsage.storageValue,
         'sampleCount': sampleCount,
         'updatedAt': updatedAt.toIso8601String(),
       };
@@ -72,6 +107,9 @@ class GestureDefinition {
       label: json['label'] as String,
       spokenText: json['spokenText'] as String,
       isDynamic: json['isDynamic'] as bool? ?? false,
+      handUsage: GestureHandUsage.fromStorageValue(
+        json['handUsage'] as String?,
+      ),
       sampleCount: json['sampleCount'] as int,
       updatedAt: DateTime.parse(json['updatedAt'] as String),
     );
@@ -144,12 +182,18 @@ class GestureModelProfile {
   final String label;
   final String spokenText;
   final bool isDynamic;
+  final GestureHandUsage handUsage;
+  final double expectedLeftFlexMean;
+  final double expectedRightFlexMean;
 
   const GestureModelProfile({
     required this.gestureId,
     required this.label,
     required this.spokenText,
     required this.isDynamic,
+    required this.handUsage,
+    required this.expectedLeftFlexMean,
+    required this.expectedRightFlexMean,
   });
 
   Map<String, dynamic> toJson() => {
@@ -157,6 +201,9 @@ class GestureModelProfile {
         'label': label,
         'spokenText': spokenText,
         'isDynamic': isDynamic,
+        'handUsage': handUsage.storageValue,
+        'expectedLeftFlexMean': expectedLeftFlexMean,
+        'expectedRightFlexMean': expectedRightFlexMean,
       };
 
   factory GestureModelProfile.fromJson(Map<String, dynamic> json) {
@@ -165,6 +212,13 @@ class GestureModelProfile {
       label: json['label'] as String,
       spokenText: json['spokenText'] as String,
       isDynamic: json['isDynamic'] as bool? ?? false,
+      handUsage: GestureHandUsage.fromStorageValue(
+        json['handUsage'] as String?,
+      ),
+      expectedLeftFlexMean:
+          (json['expectedLeftFlexMean'] as num?)?.toDouble() ?? 0.0,
+      expectedRightFlexMean:
+          (json['expectedRightFlexMean'] as num?)?.toDouble() ?? 0.0,
     );
   }
 }
@@ -234,6 +288,7 @@ class TrainingDraft {
   final String label;
   final String spokenText;
   final bool isDynamic;
+  final GestureHandUsage handUsage;
   final int targetSamples;
   final List<GestureTrainingSample> capturedSamples;
 
@@ -242,6 +297,7 @@ class TrainingDraft {
     required this.label,
     required this.spokenText,
     required this.isDynamic,
+    required this.handUsage,
     required this.targetSamples,
     required this.capturedSamples,
   });
@@ -254,6 +310,7 @@ class TrainingDraft {
     String? label,
     String? spokenText,
     bool? isDynamic,
+    GestureHandUsage? handUsage,
     int? targetSamples,
     List<GestureTrainingSample>? capturedSamples,
   }) {
@@ -262,6 +319,7 @@ class TrainingDraft {
       label: label ?? this.label,
       spokenText: spokenText ?? this.spokenText,
       isDynamic: isDynamic ?? this.isDynamic,
+      handUsage: handUsage ?? this.handUsage,
       targetSamples: targetSamples ?? this.targetSamples,
       capturedSamples: capturedSamples ?? this.capturedSamples,
     );

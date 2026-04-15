@@ -96,21 +96,32 @@ class RandomForestGestureTrainer implements GestureTrainer {
       for (final sample in samples) sample.gestureId,
     }.toList()..sort();
     final maxFeatures = max(1, sqrt(featureLength).round());
-    final profiles = <GestureModelProfile>[
-      for (final gestureId in labels)
+    final profiles = <GestureModelProfile>[];
+    for (final gestureId in labels) {
+      final representative = _representativeSample(samples, gestureId);
+      if (representative == null) {
+        continue;
+      }
+      profiles.add(
         GestureModelProfile(
-          gestureId: gestureId,
-          label: samples
-              .firstWhere((sample) => sample.gestureId == gestureId)
-              .label,
-          spokenText: samples
-              .firstWhere((sample) => sample.gestureId == gestureId)
-              .spokenText,
-          isDynamic: samples
-              .firstWhere((sample) => sample.gestureId == gestureId)
-              .isDynamic,
+          gestureId: representative.gestureId,
+          label: representative.label,
+          spokenText: representative.spokenText,
+          isDynamic: representative.isDynamic,
+          handUsage: representative.handUsage,
+          expectedLeftFlexMean: _averageHandFlexMean(
+            samples,
+            gestureId: gestureId,
+            handUsage: GestureHandUsage.leftOnly,
+          ),
+          expectedRightFlexMean: _averageHandFlexMean(
+            samples,
+            gestureId: gestureId,
+            handUsage: GestureHandUsage.rightOnly,
+          ),
         ),
-    ];
+      );
+    }
 
     final trees = List<RandomForestTreeSnapshot>.generate(treeCount, (_) {
       final bootstrapped = List<GestureTrainingSample>.generate(
@@ -329,6 +340,43 @@ class RandomForestGestureTrainer implements GestureTrainer {
     return counts;
   }
 
+  GestureTrainingSample? _representativeSample(
+    List<GestureTrainingSample> samples,
+    String gestureId,
+  ) {
+    for (final sample in samples) {
+      if (sample.gestureId == gestureId) {
+        return sample;
+      }
+    }
+    return null;
+  }
+
+  double _averageHandFlexMean(
+    List<GestureTrainingSample> samples, {
+    required String gestureId,
+    required GestureHandUsage handUsage,
+  }) {
+    var total = 0.0;
+    var count = 0;
+    final startIndex = handUsage == GestureHandUsage.rightOnly ? 14 : 0;
+    for (final sample in samples) {
+      if (sample.gestureId != gestureId || sample.featureVector.length < 19) {
+        continue;
+      }
+      var handTotal = 0.0;
+      for (var i = 0; i < 5; i++) {
+        handTotal += sample.featureVector[startIndex + i];
+      }
+      total += handTotal / 5.0;
+      count += 1;
+    }
+    if (count == 0) {
+      return 0.0;
+    }
+    return total / count;
+  }
+
   Map<String, double> _normalizeCounts(
     Map<String, int> counts,
     List<String> labels,
@@ -446,6 +494,7 @@ class GestureRecognitionService {
     required String label,
     required String spokenText,
     required bool isDynamic,
+    required GestureHandUsage handUsage,
     int targetSamples = 5,
   }) async {
     await ensureInitialized();
@@ -471,6 +520,7 @@ class GestureRecognitionService {
         label: trimmedLabel,
         spokenText: trimmedSpokenText,
         isDynamic: isDynamic,
+        handUsage: handUsage,
         targetSamples: max(1, targetSamples),
         capturedSamples: const [],
       ),
@@ -545,7 +595,25 @@ class GestureRecognitionService {
         frames,
         minimumFrames: effectiveMinimumFrames,
       );
-      final aggregated = _featureExtractor.aggregateWindow(trimmedFrames);
+      final observedHandUsage = _featureExtractor.inferDominantHandUsage(
+        trimmedFrames,
+      );
+      if (!_handUsageMatchesExpectation(draft.handUsage, observedHandUsage)) {
+        _state = _state.copyWith(
+          isRecording: false,
+          captureProgress: 0,
+          statusMessage:
+              'Capture looked like ${observedHandUsage.displayLabel.toLowerCase()}, but this gesture is set to ${draft.handUsage.displayLabel.toLowerCase()}. Keep the inactive glove neutral and try again.',
+        );
+        _emit();
+        return;
+      }
+
+      final maskedFrames = _featureExtractor.applyHandUsageMask(
+        trimmedFrames,
+        handUsage: draft.handUsage,
+      );
+      final aggregated = _featureExtractor.aggregateWindow(maskedFrames);
 
       if (aggregated.isEmpty) {
         _state = _state.copyWith(
@@ -562,6 +630,7 @@ class GestureRecognitionService {
         label: draft.label,
         spokenText: draft.spokenText,
         isDynamic: draft.isDynamic,
+        handUsage: draft.handUsage,
         featureVector: aggregated,
         createdAt: DateTime.now(),
       );
@@ -634,10 +703,11 @@ class GestureRecognitionService {
                 label: draft.label,
                 spokenText: draft.spokenText,
                 isDynamic: draft.isDynamic,
+                handUsage: draft.handUsage,
                 sampleCount: draft.capturedSamples.length,
-              updatedAt: DateTime.now(),
-            ),
-          );
+                updatedAt: DateTime.now(),
+              ),
+            );
       samplePrepStopwatch.stop();
 
       final trainStopwatch = Stopwatch()..start();
@@ -741,6 +811,7 @@ class GestureRecognitionService {
                   label: trimmedLabel,
                   spokenText: trimmedSpokenText,
                   isDynamic: sample.isDynamic,
+                  handUsage: sample.handUsage,
                   featureVector: sample.featureVector,
                   createdAt: sample.createdAt,
                 ),
@@ -756,6 +827,7 @@ class GestureRecognitionService {
                   label: trimmedLabel,
                   spokenText: trimmedSpokenText,
                   isDynamic: gesture.isDynamic,
+                  handUsage: gesture.handUsage,
                   sampleCount: gesture.sampleCount,
                   updatedAt: DateTime.now(),
                 ),
@@ -1009,6 +1081,9 @@ class GestureRecognitionService {
       List<List<double>>.from(_inferenceFrames),
       minimumFrames: 12,
     );
+    final detectedHandUsage = _featureExtractor.inferDominantHandUsage(
+      activeWindow,
+    );
     final presentationActive = _featureExtractor.isPresentationActive(
       List<List<double>>.from(_inferenceFrames),
       gyroThreshold: settings.presentationGyroThreshold,
@@ -1032,7 +1107,12 @@ class GestureRecognitionService {
     }
 
     final inferenceStopwatch = Stopwatch()..start();
-    final featureVector = _featureExtractor.aggregateWindow(activeWindow);
+    final maskedWindow = _featureExtractor.applyHandUsageMask(
+      activeWindow,
+      handUsage: detectedHandUsage,
+    );
+    final featureVector = _featureExtractor.aggregateWindow(maskedWindow);
+    final rawFeatureVector = _featureExtractor.aggregateWindow(activeWindow);
     final prediction = _trainer.predict(
       model,
       featureVector,
@@ -1053,6 +1133,37 @@ class GestureRecognitionService {
     }
 
     final predictedProfile = _profileForGesture(model, prediction.gestureId);
+    if (predictedProfile != null &&
+        !_handUsageMatchesExpectation(
+          predictedProfile.handUsage,
+          detectedHandUsage,
+        )) {
+      _lastPredictionAt = now;
+      _lastCandidateGestureId = null;
+      _candidateCount = 0;
+      _state = _state.copyWith(
+        isPresentationActive: true,
+        clearPrediction: true,
+        statusMessage:
+            'Rejected "${prediction.label}" because the live hand usage looked like ${detectedHandUsage.displayLabel.toLowerCase()}.',
+      );
+      _emit();
+      return;
+    }
+    if (predictedProfile != null &&
+        !_passesFlexSanityCheck(predictedProfile, rawFeatureVector)) {
+      _lastPredictionAt = now;
+      _lastCandidateGestureId = null;
+      _candidateCount = 0;
+      _state = _state.copyWith(
+        isPresentationActive: true,
+        clearPrediction: true,
+        statusMessage:
+            'Rejected "${prediction.label}" because the finger closure did not match the trained handshape yet.',
+      );
+      _emit();
+      return;
+    }
     final isDynamicGesture = predictedProfile?.isDynamic ?? false;
     final hasDynamicMotion = _featureExtractor.hasDynamicMotion(
       activeWindow,
@@ -1227,6 +1338,7 @@ class GestureRecognitionService {
             label: activeDraft.label,
             spokenText: activeDraft.spokenText,
             isDynamic: activeDraft.isDynamic,
+            handUsage: activeDraft.handUsage,
             targetSamples: activeDraft.targetSamples,
             capturedSamples: const [],
           );
@@ -1238,5 +1350,56 @@ class GestureRecognitionService {
         ),
       ),
     );
+  }
+
+  bool _handUsageMatchesExpectation(
+    GestureHandUsage expected,
+    GestureHandUsage observed,
+  ) {
+    if (expected == GestureHandUsage.bothHands) {
+      return observed == GestureHandUsage.bothHands;
+    }
+    return expected == observed;
+  }
+
+  bool _passesFlexSanityCheck(
+    GestureModelProfile profile,
+    List<double> rawFeatureVector,
+  ) {
+    if (rawFeatureVector.length < 19) {
+      return true;
+    }
+
+    final leftFlexMean = _mean(rawFeatureVector.sublist(0, 5));
+    final rightFlexMean = _mean(rawFeatureVector.sublist(14, 19));
+    const activeTolerance = 22.0;
+    const inactiveTolerance = 18.0;
+
+    switch (profile.handUsage) {
+      case GestureHandUsage.leftOnly:
+        return (leftFlexMean - profile.expectedLeftFlexMean).abs() <=
+                activeTolerance &&
+            rightFlexMean <= profile.expectedRightFlexMean + inactiveTolerance;
+      case GestureHandUsage.rightOnly:
+        return (rightFlexMean - profile.expectedRightFlexMean).abs() <=
+                activeTolerance &&
+            leftFlexMean <= profile.expectedLeftFlexMean + inactiveTolerance;
+      case GestureHandUsage.bothHands:
+        return (leftFlexMean - profile.expectedLeftFlexMean).abs() <=
+                activeTolerance &&
+            (rightFlexMean - profile.expectedRightFlexMean).abs() <=
+                activeTolerance;
+    }
+  }
+
+  double _mean(List<double> values) {
+    if (values.isEmpty) {
+      return 0.0;
+    }
+    var total = 0.0;
+    for (final value in values) {
+      total += value;
+    }
+    return total / values.length;
   }
 }

@@ -11,6 +11,7 @@ class AppSessionSnapshot {
   final String trainingSpokenText;
   final int trainingTargetSamples;
   final bool trainingIsDynamic;
+  final GestureHandUsage trainingHandUsage;
   final TrainingDraft? activeDraft;
 
   const AppSessionSnapshot({
@@ -19,6 +20,7 @@ class AppSessionSnapshot {
     required this.trainingSpokenText,
     required this.trainingTargetSamples,
     required this.trainingIsDynamic,
+    required this.trainingHandUsage,
     required this.activeDraft,
   });
 
@@ -29,6 +31,7 @@ class AppSessionSnapshot {
       trainingSpokenText: '',
       trainingTargetSamples: 10,
       trainingIsDynamic: false,
+      trainingHandUsage: GestureHandUsage.bothHands,
       activeDraft: null,
     );
   }
@@ -39,6 +42,7 @@ class AppSessionSnapshot {
     String? trainingSpokenText,
     int? trainingTargetSamples,
     bool? trainingIsDynamic,
+    GestureHandUsage? trainingHandUsage,
     TrainingDraft? activeDraft,
     bool clearActiveDraft = false,
   }) {
@@ -49,6 +53,7 @@ class AppSessionSnapshot {
       trainingTargetSamples:
           trainingTargetSamples ?? this.trainingTargetSamples,
       trainingIsDynamic: trainingIsDynamic ?? this.trainingIsDynamic,
+      trainingHandUsage: trainingHandUsage ?? this.trainingHandUsage,
       activeDraft: clearActiveDraft ? null : (activeDraft ?? this.activeDraft),
     );
   }
@@ -59,6 +64,7 @@ class AppSessionSnapshot {
     'trainingSpokenText': trainingSpokenText,
     'trainingTargetSamples': trainingTargetSamples,
     'trainingIsDynamic': trainingIsDynamic,
+    'trainingHandUsage': trainingHandUsage.storageValue,
     'activeDraft': activeDraft == null ? null : _draftToJson(activeDraft!),
   };
 
@@ -74,6 +80,9 @@ class AppSessionSnapshot {
           defaults.trainingTargetSamples,
       trainingIsDynamic:
           json['trainingIsDynamic'] as bool? ?? defaults.trainingIsDynamic,
+      trainingHandUsage: GestureHandUsage.fromStorageValue(
+        json['trainingHandUsage'] as String?,
+      ),
       activeDraft: json['activeDraft'] == null
           ? null
           : _draftFromJson(json['activeDraft'] as Map<String, dynamic>),
@@ -85,6 +94,7 @@ class AppSessionSnapshot {
     'label': draft.label,
     'spokenText': draft.spokenText,
     'isDynamic': draft.isDynamic,
+    'handUsage': draft.handUsage.storageValue,
     'targetSamples': draft.targetSamples,
     'capturedSamples': draft.capturedSamples
         .map((sample) => sample.toJson())
@@ -97,6 +107,9 @@ class AppSessionSnapshot {
       label: json['label'] as String,
       spokenText: json['spokenText'] as String,
       isDynamic: json['isDynamic'] as bool? ?? false,
+      handUsage: GestureHandUsage.fromStorageValue(
+        json['handUsage'] as String?,
+      ),
       targetSamples: json['targetSamples'] as int? ?? 1,
       capturedSamples: (json['capturedSamples'] as List<dynamic>? ?? const [])
           .map(

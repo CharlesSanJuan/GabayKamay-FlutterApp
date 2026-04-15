@@ -177,7 +177,7 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
                 subtitle: Text(
-                  'Windows: ${gesture.sampleCount}\nSpeaks: ${gesture.spokenText}\nStatus: ${disabledGestureIds.contains(gesture.id) ? "Disabled" : "Enabled"}',
+                  'Windows: ${gesture.sampleCount}\nHands: ${gesture.handUsage.displayLabel}\nSpeaks: ${gesture.spokenText}\nStatus: ${disabledGestureIds.contains(gesture.id) ? "Disabled" : "Enabled"}',
                 ),
                 isThreeLine: true,
                 leading: Switch(
