@@ -10,6 +10,9 @@ class AppSettings {
   final double presentationFlexThreshold;
   final double presentationAccelerationThreshold;
   final double presentationPoseThreshold;
+  final double activeHandFlexTolerance;
+  final double inactiveHandFlexAllowance;
+  final double inactiveHandFlexCap;
   final double flexSmoothingAlpha;
   final double imuSmoothingAlpha;
   final double flexDeadband;
@@ -29,6 +32,9 @@ class AppSettings {
     required this.presentationFlexThreshold,
     required this.presentationAccelerationThreshold,
     required this.presentationPoseThreshold,
+    required this.activeHandFlexTolerance,
+    required this.inactiveHandFlexAllowance,
+    required this.inactiveHandFlexCap,
     required this.flexSmoothingAlpha,
     required this.imuSmoothingAlpha,
     required this.flexDeadband,
@@ -50,6 +56,9 @@ class AppSettings {
       presentationFlexThreshold: 6.0,
       presentationAccelerationThreshold: 0.12,
       presentationPoseThreshold: 35.0,
+      activeHandFlexTolerance: 30.0,
+      inactiveHandFlexAllowance: 32.0,
+      inactiveHandFlexCap: 68.0,
       flexSmoothingAlpha: 0.62,
       imuSmoothingAlpha: 0.68,
       flexDeadband: 0.35,
@@ -71,6 +80,9 @@ class AppSettings {
     double? presentationFlexThreshold,
     double? presentationAccelerationThreshold,
     double? presentationPoseThreshold,
+    double? activeHandFlexTolerance,
+    double? inactiveHandFlexAllowance,
+    double? inactiveHandFlexCap,
     double? flexSmoothingAlpha,
     double? imuSmoothingAlpha,
     double? flexDeadband,
@@ -96,6 +108,12 @@ class AppSettings {
           this.presentationAccelerationThreshold,
       presentationPoseThreshold:
           presentationPoseThreshold ?? this.presentationPoseThreshold,
+      activeHandFlexTolerance:
+          activeHandFlexTolerance ?? this.activeHandFlexTolerance,
+      inactiveHandFlexAllowance:
+          inactiveHandFlexAllowance ?? this.inactiveHandFlexAllowance,
+      inactiveHandFlexCap:
+          inactiveHandFlexCap ?? this.inactiveHandFlexCap,
       flexSmoothingAlpha: flexSmoothingAlpha ?? this.flexSmoothingAlpha,
       imuSmoothingAlpha: imuSmoothingAlpha ?? this.imuSmoothingAlpha,
       flexDeadband: flexDeadband ?? this.flexDeadband,
@@ -120,6 +138,9 @@ class AppSettings {
     'presentationFlexThreshold': presentationFlexThreshold,
     'presentationAccelerationThreshold': presentationAccelerationThreshold,
     'presentationPoseThreshold': presentationPoseThreshold,
+    'activeHandFlexTolerance': activeHandFlexTolerance,
+    'inactiveHandFlexAllowance': inactiveHandFlexAllowance,
+    'inactiveHandFlexCap': inactiveHandFlexCap,
     'flexSmoothingAlpha': flexSmoothingAlpha,
     'imuSmoothingAlpha': imuSmoothingAlpha,
     'flexDeadband': flexDeadband,
@@ -154,6 +175,15 @@ class AppSettings {
       presentationPoseThreshold:
           (json['presentationPoseThreshold'] as num?)?.toDouble() ??
           defaults.presentationPoseThreshold,
+      activeHandFlexTolerance:
+          (json['activeHandFlexTolerance'] as num?)?.toDouble() ??
+          defaults.activeHandFlexTolerance,
+      inactiveHandFlexAllowance:
+          (json['inactiveHandFlexAllowance'] as num?)?.toDouble() ??
+          defaults.inactiveHandFlexAllowance,
+      inactiveHandFlexCap:
+          (json['inactiveHandFlexCap'] as num?)?.toDouble() ??
+          defaults.inactiveHandFlexCap,
       flexSmoothingAlpha:
           (json['flexSmoothingAlpha'] as num?)?.toDouble() ??
           defaults.flexSmoothingAlpha,

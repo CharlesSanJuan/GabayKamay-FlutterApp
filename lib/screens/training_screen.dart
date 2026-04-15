@@ -28,8 +28,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
   int _targetSamples = 10;
   bool _isDynamicGesture = false;
   GestureHandUsage _handUsage = GestureHandUsage.bothHands;
-  String? _autoCaptureDraftId;
-  int? _autoCaptureCapturedCount;
+  Timer? _autoCaptureTimer;
 
   @override
   void initState() {
@@ -71,6 +70,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
 
   @override
   void dispose() {
+    _autoCaptureTimer?.cancel();
     _stateSub?.cancel();
     _settingsSub?.cancel();
     _labelController.dispose();
@@ -97,24 +97,17 @@ class _TrainingScreenState extends State<TrainingScreen> {
         draft == null ||
         state.isRecording ||
         draft.isComplete) {
-      if (draft == null ||
-          draft.isComplete ||
-          !settings.trainingAutoCaptureEnabled) {
-        _autoCaptureDraftId = null;
-        _autoCaptureCapturedCount = null;
-      }
+      _autoCaptureTimer?.cancel();
+      _autoCaptureTimer = null;
       return;
     }
 
-    if (_autoCaptureDraftId == draft.gestureId &&
-        _autoCaptureCapturedCount == draft.capturedCount) {
+    if (_autoCaptureTimer != null) {
       return;
     }
 
-    _autoCaptureDraftId = draft.gestureId;
-    _autoCaptureCapturedCount = draft.capturedCount;
-
-    Future<void>.delayed(const Duration(milliseconds: 450), () async {
+    _autoCaptureTimer = Timer(const Duration(milliseconds: 650), () async {
+      _autoCaptureTimer = null;
       if (!mounted) {
         return;
       }
@@ -125,7 +118,6 @@ class _TrainingScreenState extends State<TrainingScreen> {
       if (!latestSettings.trainingAutoCaptureEnabled ||
           latestDraft == null ||
           latestDraft.gestureId != draft.gestureId ||
-          latestDraft.capturedCount != draft.capturedCount ||
           latestDraft.isComplete ||
           latestState.isRecording) {
         return;

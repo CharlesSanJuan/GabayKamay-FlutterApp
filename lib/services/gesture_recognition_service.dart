@@ -598,15 +598,10 @@ class GestureRecognitionService {
       final observedHandUsage = _featureExtractor.inferDominantHandUsage(
         trimmedFrames,
       );
+      String? captureNote;
       if (!_handUsageMatchesExpectation(draft.handUsage, observedHandUsage)) {
-        _state = _state.copyWith(
-          isRecording: false,
-          captureProgress: 0,
-          statusMessage:
-              'Capture looked like ${observedHandUsage.displayLabel.toLowerCase()}, but this gesture is set to ${draft.handUsage.displayLabel.toLowerCase()}. Keep the inactive glove neutral and try again.',
-        );
-        _emit();
-        return;
+        captureNote =
+            'Captured with a hand-usage mismatch. Intended ${draft.handUsage.displayLabel.toLowerCase()}, observed ${observedHandUsage.displayLabel.toLowerCase()}.';
       }
 
       final maskedFrames = _featureExtractor.applyHandUsageMask(
@@ -644,7 +639,7 @@ class GestureRecognitionService {
         activeDraft: updatedDraft,
         statusMessage: updatedDraft.isComplete
             ? 'Capture complete. Save and retrain the model.'
-            : 'Captured window ${updatedDraft.capturedCount} of ${updatedDraft.targetSamples}. ${draft.isDynamic ? "Movement path recorded." : "Static sign recorded."}',
+            : 'Captured window ${updatedDraft.capturedCount} of ${updatedDraft.targetSamples}. ${draft.isDynamic ? "Movement path recorded." : "Static sign recorded."}${captureNote == null ? "" : " $captureNote"}',
       );
       _emit();
     } catch (e) {
@@ -1370,20 +1365,30 @@ class GestureRecognitionService {
       return true;
     }
 
+    final settings = _settingsService.settings;
     final leftFlexMean = _mean(rawFeatureVector.sublist(0, 5));
     final rightFlexMean = _mean(rawFeatureVector.sublist(14, 19));
-    const activeTolerance = 22.0;
-    const inactiveTolerance = 18.0;
+    final activeTolerance = settings.activeHandFlexTolerance;
+    final inactiveDriftAllowance = settings.inactiveHandFlexAllowance;
+    final relaxedInactiveCap = settings.inactiveHandFlexCap;
 
     switch (profile.handUsage) {
       case GestureHandUsage.leftOnly:
         return (leftFlexMean - profile.expectedLeftFlexMean).abs() <=
                 activeTolerance &&
-            rightFlexMean <= profile.expectedRightFlexMean + inactiveTolerance;
+            rightFlexMean <=
+                max(
+                  profile.expectedRightFlexMean + inactiveDriftAllowance,
+                  relaxedInactiveCap,
+                );
       case GestureHandUsage.rightOnly:
         return (rightFlexMean - profile.expectedRightFlexMean).abs() <=
                 activeTolerance &&
-            leftFlexMean <= profile.expectedLeftFlexMean + inactiveTolerance;
+            leftFlexMean <=
+                max(
+                  profile.expectedLeftFlexMean + inactiveDriftAllowance,
+                  relaxedInactiveCap,
+                );
       case GestureHandUsage.bothHands:
         return (leftFlexMean - profile.expectedLeftFlexMean).abs() <=
                 activeTolerance &&

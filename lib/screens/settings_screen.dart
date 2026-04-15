@@ -211,6 +211,53 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   );
                 },
               ),
+              _SliderTile(
+                label: 'Active Hand Flex Tolerance',
+                helperText:
+                    'Higher values make the trained handshape check more forgiving for the signing hand.',
+                value: settings.activeHandFlexTolerance,
+                min: 8.0,
+                max: 60.0,
+                divisions: 52,
+                valueText: settings.activeHandFlexTolerance.toStringAsFixed(0),
+                onChanged: (value) async {
+                  await _save(
+                    settings.copyWith(activeHandFlexTolerance: value),
+                  );
+                },
+              ),
+              _SliderTile(
+                label: 'Inactive Hand Drift Allowance',
+                helperText:
+                    'Higher values let the non-signing hand drift farther from its trained resting flex before a gesture is rejected.',
+                value: settings.inactiveHandFlexAllowance,
+                min: 8.0,
+                max: 70.0,
+                divisions: 62,
+                valueText: settings.inactiveHandFlexAllowance.toStringAsFixed(
+                  0,
+                ),
+                onChanged: (value) async {
+                  await _save(
+                    settings.copyWith(inactiveHandFlexAllowance: value),
+                  );
+                },
+              ),
+              _SliderTile(
+                label: 'Inactive Hand Flex Cap',
+                helperText:
+                    'Sets an absolute ceiling for how bent the non-signing hand may be before one-handed gestures are blocked.',
+                value: settings.inactiveHandFlexCap,
+                min: 20.0,
+                max: 100.0,
+                divisions: 80,
+                valueText: settings.inactiveHandFlexCap.toStringAsFixed(0),
+                onChanged: (value) async {
+                  await _save(
+                    settings.copyWith(inactiveHandFlexCap: value),
+                  );
+                },
+              ),
             ],
           ),
           _Section(
